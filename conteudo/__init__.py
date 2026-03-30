@@ -1,0 +1,1 @@
+# Pacote de conteúdo criativo — personagens, roteiros, temas, histórico e scheduler

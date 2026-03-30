@@ -1,0 +1,7 @@
+selenium
+python-dotenv
+pyautogui
+pygetwindow
+pillow
+pyperclip
+pytesseract
