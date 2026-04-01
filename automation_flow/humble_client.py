@@ -5,6 +5,8 @@ import time
 import shutil
 from pathlib import Path
 from datetime import datetime
+import uuid
+import pyperclip
 
 import pyautogui
 import pygetwindow as gw
@@ -248,8 +250,43 @@ def configurar_nano_video_9x16_x1_fast(driver):
     time.sleep(1)
 
 
+# ============ DEBUG PROMPT ============
+
+def _ler_texto_prompt_box(box):
+    try:
+        txt = box.get_attribute("innerText")
+        return (txt or "").strip()
+    except Exception:
+        return ""
+
+
+def _debug_dump_cards(driver):
+    cards = driver.find_elements(By.XPATH, "//div[contains(@class,'sc-5c6add13-2')]")
+    _log(f"[DEBUG CARDS] Total de cards visíveis: {len(cards)}")
+    for idx, card in enumerate(cards[:10], 1):
+        try:
+            txt = (card.text or "").replace("\n", " ")[:200]
+        except Exception:
+            txt = "<sem texto>"
+        try:
+            tid = card.get_attribute("data-tile-id")
+        except Exception:
+            tid = None
+        _log(f"[DEBUG CARDS] #{idx} tile_id={tid} texto={txt!r}")
+
+
+def _limpar_prompt_box(box):
+    try:
+        box.send_keys(Keys.CONTROL, "a")
+        time.sleep(0.2)
+        box.send_keys(Keys.BACKSPACE)
+        time.sleep(0.3)
+    except Exception:
+        pass
+
+
 def preencher_prompt(driver, prompt: str):
-    _log("[HUMBLE] Preenchendo prompt...")
+    _log("[HUMBLE] Preenchendo prompt (COLAR de uma vez)...")
 
     box = _wait_visible(
         driver,
@@ -265,6 +302,7 @@ def preencher_prompt(driver, prompt: str):
     time.sleep(0.3)
 
     try:
+        driver.execute_script("arguments[0].focus();", box)
         driver.execute_script("arguments[0].click();", box)
     except Exception:
         try:
@@ -275,16 +313,35 @@ def preencher_prompt(driver, prompt: str):
             for o in overlays:
                 driver.execute_script("arguments[0].remove();", o)
             time.sleep(0.3)
+            driver.execute_script("arguments[0].focus();", box)
             driver.execute_script("arguments[0].click();", box)
         except Exception:
             pass
 
-    time.sleep(0.3)
-    box.send_keys(Keys.CONTROL, "a")
-    box.send_keys(Keys.DELETE)
-    box.send_keys(prompt)
-    time.sleep(1)
+    time.sleep(0.4)
 
+    antes = _ler_texto_prompt_box(box)
+    _log(f"[DEBUG PROMPT] Estado inicial: {antes[:120]!r}")
+
+    # NADA de limpar via JS. Só Ctrl+A.
+    try:
+        box.send_keys(Keys.CONTROL, "a")
+        time.sleep(0.2)
+    except Exception:
+        pass
+
+    # Cola TUDO de uma vez
+    pyperclip.copy(prompt)
+    box.send_keys(Keys.CONTROL, "v")
+    time.sleep(1.2)
+
+    depois = _ler_texto_prompt_box(box)
+    _log(f"[DEBUG PROMPT] Depois de colar: {depois[:200]!r}")
+    _log(f"[DEBUG PROMPT] Tamanho esperado={len(prompt)} | atual={len(depois)}")
+
+    # Confere se o começo bate
+    if prompt[:80].strip() not in depois:
+        raise HumbleFlowError("Prompt não colou integralmente no campo.")
 
 def clicar_criar(driver):
     _log("[HUMBLE] Clicando em Criar...")
@@ -297,6 +354,7 @@ def clicar_criar(driver):
         descricao="botão Criar",
     )
     time.sleep(2)
+    _debug_dump_cards(driver)
 
 
 def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
@@ -342,7 +400,17 @@ def _safe_len(iterable):
         return "?"
 
 
+def _listar_cards(driver):
+    return driver.find_elements(By.XPATH, "//div[contains(@class,'sc-5c6add13-2')]")
+
+
+def _card_mais_recente(driver):
+    cards = _listar_cards(driver)
+    return cards[0] if cards else None
+
+
 def _encontrar_card_por_prompt(driver, prompt: str):
+    # Mantido apenas como fallback de debug (não é mais a chave principal)
     trecho = prompt[:60].replace("'", " ").strip()
     if not trecho:
         _log("[HUMBLE] _encontrar_card_por_prompt: trecho vazio, retornando None.")
@@ -362,10 +430,7 @@ def _encontrar_card_por_prompt(driver, prompt: str):
     except NoSuchElementException:
         _log("[HUMBLE] Card não encontrado pelo subtítulo em PT; tentando fallback...")
 
-    cards = driver.find_elements(
-        By.XPATH,
-        "//div[contains(@class,'sc-5c6add13-2')]"
-    )
+    cards = _listar_cards(driver)
     _log(f"[HUMBLE] {_safe_len(cards)} cards encontrados na lista para fallback.")
 
     trecho_lower = trecho.lower()
@@ -476,21 +541,30 @@ def aguardar_geracao_video(driver, prompt: str, timeout=300):
     _log("[HUMBLE] Aguardando geração do vídeo...")
 
     fim = time.time() + timeout
+    instante_inicio = time.time()
     card = None
     tile_id = None
     viu_percentual = False
     ciclos_sem_percent = 0
     ultimo_percentual = None
+    TEMPO_MAX_SEM_PERCENT_INICIAL = 15
 
     while time.time() < fim:
         if tile_id:
             card = _encontrar_card_por_tile_id(driver, tile_id)
+
         if not card:
+            # Segue a lógica do Guru: card mais recente é o do vídeo atual
+            card = _card_mais_recente(driver)
+
+        if not card:
+            # Fallback extremo: tentar pelo prompt
             card = _encontrar_card_por_prompt(driver, prompt)
-            if card and not tile_id:
-                tile_id = _obter_tile_id(card)
-                if tile_id:
-                    _log(f"[HUMBLE] Tile ID detectado: {tile_id}")
+
+        if card and not tile_id:
+            tile_id = _obter_tile_id(card)
+            if tile_id:
+                _log(f"[HUMBLE] Tile ID detectado: {tile_id}")
 
         if card:
             if _card_tem_erro(card):
@@ -505,14 +579,16 @@ def aguardar_geracao_video(driver, prompt: str, timeout=300):
                     _log(f"ℹ Progresso: {perc}")
                     ultimo_percentual = perc
             else:
-                if viu_percentual:
+                if not viu_percentual:
+                    if time.time() - instante_inicio >= TEMPO_MAX_SEM_PERCENT_INICIAL:
+                        _log("❌ Nenhuma % apareceu nos primeiros ~15s. Assumindo erro.")
+                        return {"status": "erro", "tile_id": tile_id}
+                else:
                     ciclos_sem_percent += 1
                     _log(f"ℹ Percentual ausente (ciclo {ciclos_sem_percent}), tentando abrir card em seguida.")
                     if ciclos_sem_percent >= 2:
                         _log("✔ Percentual sumiu de forma estável, vídeo provavelmente pronto.")
                         return {"status": "ok", "tile_id": tile_id}
-                else:
-                    ciclos_sem_percent = 0
 
         time.sleep(3)
 
@@ -637,7 +713,7 @@ def baixar_video_720p(
     destino_dir: Path | None = None,
     nome_arquivo: str | None = None,
 ):
-    download_dir = Path(DOWNLOAD_DIR)        # pasta temporária do .env
+    download_dir = Path(DOWNLOAD_DIR)         # pasta temporária do .env
     destino_dir = Path(destino_dir or DOWNLOAD_DIR)  # pasta final (personagem) ou mesma
 
     download_dir.mkdir(parents=True, exist_ok=True)
@@ -686,33 +762,34 @@ def gerar_video_humble(
     driver,
     prompt: str,
     destino_dir: Path | None = None,
-    tentativas: int = 3,
 ):
-    for tentativa in range(1, tentativas + 1):
-        preencher_prompt(driver, prompt)
-        clicar_criar(driver)
-        _log(f"✔ Prompt enviado ao Flow. (tentativa {tentativa}/{tentativas})")
+    marker = f"[DBG-{uuid.uuid4().hex[:8]}]"
+    _log(f"[DEBUG PROMPT] Marker (SO LOG): {marker}")
 
-        resultado = aguardar_geracao_video(driver, prompt)
-        status = resultado.get("status")
-        tile_id = resultado.get("tile_id")
+    preencher_prompt(driver, prompt)
 
-        if status == "ok":
-            _log("✔ Geração concluída (percentual sumiu). Tentando abrir card do vídeo...")
-            try:
-                abrir_video_pronto(driver, tile_id=tile_id, prompt=prompt)
-                arquivo_final = baixar_video_720p(driver, destino_dir=destino_dir)
-                _log(f"✔ Download concluído em: {arquivo_final}")
-                _log("✔ Voltando para tela de prompts.")
-                voltar_para_lista_videos(driver)
-                return arquivo_final
-            except Exception as e:
-                _log(f"❌ Erro ao abrir/baixar vídeo pronto: {e!r}")
-                if DEBUG_NAO_FECHAR:
-                    _log("DEBUG_NAO_FECHAR=True → mantendo browser aberto após erro.")
-                    input("DEBUG: Aperte ENTER no console depois de olhar o Flow...")
-                raise
+    _log("[HUMBLE] Enviando prompt com ENTER...")
+    box = driver.find_element(
+        By.XPATH,
+        "//div[@role='textbox' and @contenteditable='true']",
+    )
+    box.send_keys(Keys.ENTER)
+    time.sleep(2)
+    _log("✔ Prompt enviado ao Flow.")
 
-        _log("ℹ Tentando novamente geração após erro...")
+    resultado = aguardar_geracao_video(driver, prompt)
+    status = resultado.get("status")
+    tile_id = resultado.get("tile_id")
 
-    raise HumbleFlowError("Falha ao gerar vídeo após múltiplas tentativas.")
+    if status != "ok":
+        raise HumbleFlowError(f"Geração falhou com status={status!r}")
+
+    _log("✔ Geração concluída. Abrindo card do vídeo...")
+    abrir_video_pronto(driver, tile_id=tile_id, prompt=prompt)
+    arquivo_final = baixar_video_720p(driver, destino_dir=destino_dir)
+
+    _log(f"✔ Download concluído em: {arquivo_final}")
+    _log("✔ Voltando para tela de prompts.")
+    voltar_para_lista_videos(driver)
+
+    return arquivo_final
