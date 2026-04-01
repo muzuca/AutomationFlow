@@ -499,41 +499,100 @@ def _encontrar_card_por_tile_id(driver, tile_id: str):
         return None
 
 
-def _obter_percentual_card(card):
+# ====== NOVA LÓGICA DE ESTADO DO CARD (SEM DEPENDER DE %) ======
+
+
+def _texto_card(card) -> str:
     try:
-        span = card.find_element(
-            By.XPATH,
-            ".//span[contains(text(), '%')]"
-        )
-        texto = span.text.strip()
-        return texto if texto else None
-    except NoSuchElementException:
-        return None
+        return " ".join((card.text or "").split())
+    except Exception:
+        return ""
+
+
+def _card_tem_video_ou_preview(card) -> bool:
+    xpaths = [
+        ".//video",
+        ".//img",
+        ".//canvas",
+        ".//button[.//video]",
+        ".//*[contains(@aria-label,'Open') or contains(@aria-label,'Abrir')]",
+        ".//*[contains(@aria-label,'Download') or contains(@aria-label,'Baixar')]",
+        ".//i[text()='download']",
+    ]
+    for xp in xpaths:
+        try:
+            if card.find_elements(By.XPATH, xp):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _card_tem_sinal_processando(card) -> bool:
+    xpaths = [
+        ".//*[contains(text(), '%')]",
+        ".//*[contains(text(), 'Generating')]",
+        ".//*[contains(text(), 'Gerando')]",
+        ".//*[contains(text(), 'Processing')]",
+        ".//*[contains(text(), 'Processando')]",
+        ".//*[contains(@aria-label, 'loading')]",
+        ".//*[contains(@class, 'spin')]",
+        ".//*[contains(@class, 'loading')]",
+        ".//svg[contains(@class,'animate-spin')]",
+    ]
+    for xp in xpaths:
+        try:
+            if card.find_elements(By.XPATH, xp):
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def _card_tem_erro(card) -> bool:
+    termos = [
+        "Falha", "Erro", "Violação", "Violation",
+        "Failed", "Error", "Something went wrong",
+        "Não foi possível", "Couldn’t generate", "Couldn't generate",
+    ]
     try:
-        div_texto = card.find_element(
-            By.XPATH,
-            ".//div[contains(@class,'sc-25d34a31-1') or contains(@class,'sc-365a7498-3')]",
-        )
-        txt = div_texto.text or ""
-        return any(k.lower() in txt.lower() for k in ERRO_KEYWORDS)
-    except NoSuchElementException:
-        return False
+        txt = _texto_card(card).lower()
+    except Exception:
+        txt = ""
+    return any(t.lower() in txt for t in termos)
 
 
-def aguardar_geracao_video(driver, prompt: str, timeout=300):
-    _log("[HUMBLE] Aguardando geração do vídeo...")
+def _snapshot_card(card):
+    try:
+        txt = _texto_card(card)
+    except Exception:
+        txt = ""
+
+    try:
+        html = card.get_attribute("innerHTML") or ""
+    except Exception:
+        html = ""
+
+    return {
+        "texto": txt[:500],
+        "tam_html": len(html),
+        "tem_video": _card_tem_video_ou_preview(card),
+        "tem_processando": _card_tem_sinal_processando(card),
+        "tem_erro": _card_tem_erro(card),
+    }
+
+
+def aguardar_geracao_video(driver, prompt: str, timeout=420):
+    _log("[HUMBLE] Aguardando geração do vídeo (modo inteligente)...")
 
     fim = time.time() + timeout
-    instante_inicio = time.time()
     card = None
     tile_id = None
-    viu_percentual = False
-    ciclos_sem_percent = 0
-    ultimo_percentual = None
-    TEMPO_MAX_SEM_PERCENT_INICIAL = 15
+
+    ultimo_snapshot = None
+    ultimo_movimento = time.time()
+    viu_sinal_de_vida = False
+    viu_processando = False
 
     while time.time() < fim:
         if tile_id:
@@ -545,34 +604,66 @@ def aguardar_geracao_video(driver, prompt: str, timeout=300):
         if not card:
             card = _encontrar_card_por_prompt(driver, prompt)
 
-        if card and not tile_id:
+        if not card:
+            _log("ℹ Ainda sem card visível. Aguardando...")
+            time.sleep(2)
+            continue
+
+        if not tile_id:
             tile_id = _obter_tile_id(card)
             if tile_id:
                 _log(f"[HUMBLE] Tile ID detectado: {tile_id}")
 
-        if card:
-            if _card_tem_erro(card):
-                _log("❌ Card em estado de erro (Falha/Erro/Violação).")
-                return {"status": "erro", "tile_id": tile_id}
+        snap = _snapshot_card(card)
 
-            perc = _obter_percentual_card(card)
-            if perc:
-                viu_percentual = True
-                ciclos_sem_percent = 0
-                if perc != ultimo_percentual:
-                    _log(f"ℹ Progresso: {perc}")
-                    ultimo_percentual = perc
-            else:
-                if not viu_percentual:
-                    if time.time() - instante_inicio >= TEMPO_MAX_SEM_PERCENT_INICIAL:
-                        _log("❌ Nenhuma % apareceu nos primeiros ~15s. Assumindo erro.")
-                        return {"status": "erro", "tile_id": tile_id}
-                else:
-                    ciclos_sem_percent += 1
-                    _log(f"ℹ Percentual ausente (ciclo {ciclos_sem_percent}), tentando abrir card em seguida.")
-                    if ciclos_sem_percent >= 2:
-                        _log("✔ Percentual sumiu de forma estável, vídeo provavelmente pronto.")
-                        return {"status": "ok", "tile_id": tile_id}
+        if snap["tem_erro"]:
+            _log("❌ Card em estado de erro detectado por texto real.")
+            return {"status": "erro", "tile_id": tile_id}
+
+        if snap["tem_video"]:
+            _log("✔ Card com preview/vídeo/download detectado. Vídeo pronto.")
+            return {"status": "ok", "tile_id": tile_id}
+
+        if snap["tem_processando"]:
+            if not viu_processando:
+                _log("ℹ Sinal de processamento detectado.")
+            viu_processando = True
+            viu_sinal_de_vida = True
+            ultimo_movimento = time.time()
+
+        if ultimo_snapshot is None:
+            ultimo_snapshot = snap
+            _log(f"ℹ Snapshot inicial do card: {snap}")
+            time.sleep(2)
+            continue
+
+        mudou = (
+            snap["texto"] != ultimo_snapshot["texto"]
+            or snap["tam_html"] != ultimo_snapshot["tam_html"]
+            or snap["tem_processando"] != ultimo_snapshot["tem_processando"]
+            or snap["tem_video"] != ultimo_snapshot["tem_video"]
+        )
+
+        if mudou:
+            viu_sinal_de_vida = True
+            ultimo_movimento = time.time()
+            _log(
+                f"ℹ Card mudou: html {ultimo_snapshot['tam_html']} -> {snap['tam_html']} | "
+                f"processando={snap['tem_processando']} | video={snap['tem_video']}"
+            )
+            ultimo_snapshot = snap
+        else:
+            parado = int(time.time() - ultimo_movimento)
+            _log(f"ℹ Card sem mudanças há {parado}s.")
+
+        if not viu_sinal_de_vida:
+            if time.time() - ultimo_movimento > 45:
+                _log("❌ Card sem qualquer sinal de vida por 45s. Assumindo erro silencioso.")
+                return {"status": "erro", "tile_id": tile_id}
+        else:
+            if time.time() - ultimo_movimento > 90:
+                _log("❌ Card ficou estagnado por 90s após sinais de vida. Assumindo erro.")
+                return {"status": "erro", "tile_id": tile_id}
 
         time.sleep(3)
 
