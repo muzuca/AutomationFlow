@@ -122,13 +122,17 @@ def fazer_login_google(driver, email: str, senha: str):
     campo_email.clear()
     campo_email.send_keys(email)
 
+    # Avançar / Next e-mail (id estável + fallback por texto)
     _wait_click(
         driver,
         By.XPATH,
-        "//button[.//span[normalize-space()='Avançar']]"
-        " | //div[@role='button'][.//span[normalize-space()='Avançar']]",
-        timeout=20,
-        descricao="Avançar e-mail",
+        (
+            "//div[@id='identifierNext']"
+            " | //button[.//span[normalize-space()='Avançar' or normalize-space()='Next']]"
+            " | //div[@role='button'][.//span[normalize-space()='Avançar' or normalize-space()='Next']]"
+        ),
+        timeout=30,
+        descricao="Avançar/Next e-mail",
     )
 
     campo_senha = _wait_visible(
@@ -141,13 +145,17 @@ def fazer_login_google(driver, email: str, senha: str):
     campo_senha.clear()
     campo_senha.send_keys(senha)
 
+    # Avançar / Next senha
     _wait_click(
         driver,
         By.XPATH,
-        "//button[.//span[normalize-space()='Avançar']]"
-        " | //div[@role='button'][.//span[normalize-space()='Avançar']]",
-        timeout=20,
-        descricao="Avançar senha",
+        (
+            "//div[@id='passwordNext']"
+            " | //button[.//span[normalize-space()='Avançar' or normalize-space()='Next']]"
+            " | //div[@role='button'][.//span[normalize-space()='Avançar' or normalize-space()='Next']]"
+        ),
+        timeout=30,
+        descricao="Avançar/Next senha",
     )
 
     time.sleep(6)
@@ -252,6 +260,7 @@ def configurar_nano_video_9x16_x1_fast(driver):
 
 # ============ DEBUG PROMPT ============
 
+
 def _ler_texto_prompt_box(box):
     try:
         txt = box.get_attribute("innerText")
@@ -261,7 +270,7 @@ def _ler_texto_prompt_box(box):
 
 
 def _debug_dump_cards(driver):
-    cards = driver.find_elements(By.XPATH, "//div[contains(@class,'sc-5c6add13-2')]")
+    cards = driver.find_elements(By.XPATH, "//*[@data-tile-id]")
     _log(f"[DEBUG CARDS] Total de cards visíveis: {len(cards)}")
     for idx, card in enumerate(cards[:10], 1):
         try:
@@ -323,14 +332,12 @@ def preencher_prompt(driver, prompt: str):
     antes = _ler_texto_prompt_box(box)
     _log(f"[DEBUG PROMPT] Estado inicial: {antes[:120]!r}")
 
-    # NADA de limpar via JS. Só Ctrl+A.
     try:
         box.send_keys(Keys.CONTROL, "a")
         time.sleep(0.2)
     except Exception:
         pass
 
-    # Cola TUDO de uma vez
     pyperclip.copy(prompt)
     box.send_keys(Keys.CONTROL, "v")
     time.sleep(1.2)
@@ -339,17 +346,16 @@ def preencher_prompt(driver, prompt: str):
     _log(f"[DEBUG PROMPT] Depois de colar: {depois[:200]!r}")
     _log(f"[DEBUG PROMPT] Tamanho esperado={len(prompt)} | atual={len(depois)}")
 
-    # Confere se o começo bate
     if prompt[:80].strip() not in depois:
         raise HumbleFlowError("Prompt não colou integralmente no campo.")
+
 
 def clicar_criar(driver):
     _log("[HUMBLE] Clicando em Criar...")
     _wait_click(
         driver,
         By.XPATH,
-        "//button[.//i[text()='arrow_forward']"
-        " or .//span[normalize-space()='Criar']]",
+        "//button[.//i[text()='arrow_forward'] or .//span[normalize-space()='Criar']]",
         timeout=20,
         descricao="botão Criar",
     )
@@ -390,6 +396,7 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
 #   MONITOR DE GERAÇÃO
 # ==========================
 
+
 ERRO_KEYWORDS = ["Falha", "Erro", "Violação"]
 
 
@@ -401,7 +408,7 @@ def _safe_len(iterable):
 
 
 def _listar_cards(driver):
-    return driver.find_elements(By.XPATH, "//div[contains(@class,'sc-5c6add13-2')]")
+    return driver.find_elements(By.XPATH, "//*[@data-tile-id]")
 
 
 def _card_mais_recente(driver):
@@ -410,25 +417,12 @@ def _card_mais_recente(driver):
 
 
 def _encontrar_card_por_prompt(driver, prompt: str):
-    # Mantido apenas como fallback de debug (não é mais a chave principal)
     trecho = prompt[:60].replace("'", " ").strip()
     if not trecho:
         _log("[HUMBLE] _encontrar_card_por_prompt: trecho vazio, retornando None.")
         return None
 
     _log(f"[HUMBLE] Procurando card pelo trecho: {trecho!r}")
-
-    xpath_original = (
-        "//div[contains(@class,'sc-5c6add13-2')]"
-        "[.//div[contains(@class,'sc-55ebc859-6') and contains(., \"%s\")]]"
-        % trecho
-    )
-    try:
-        card = driver.find_element(By.XPATH, xpath_original)
-        _log("[HUMBLE] Card encontrado pelo subtítulo em PT (estado GERANDO).")
-        return card
-    except NoSuchElementException:
-        _log("[HUMBLE] Card não encontrado pelo subtítulo em PT; tentando fallback...")
 
     cards = _listar_cards(driver)
     _log(f"[HUMBLE] {_safe_len(cards)} cards encontrados na lista para fallback.")
@@ -462,10 +456,10 @@ def _encontrar_card_por_prompt(driver, prompt: str):
             candidato_sem_video = card
 
     if candidato_com_video:
-        _log("[HUMBLE] Card encontrado pelo texto + video pronto (estado PRONTO).")
+        _log("[HUMBLE] Card encontrado pelo texto + vídeo pronto (estado PRONTO).")
         return candidato_com_video
     if candidato_sem_video:
-        _log("[HUMBLE] Card encontrado pelo texto sem video (fallback).")
+        _log("[HUMBLE] Card encontrado pelo texto sem vídeo (fallback).")
         return candidato_sem_video
 
     _log("[HUMBLE] Nenhum card compatível encontrado.")
@@ -502,23 +496,15 @@ def _encontrar_card_por_tile_id(driver, tile_id: str):
         )
         return card
     except Exception:
-        pass
-
-    try:
-        card = driver.find_element(
-            By.XPATH,
-            f"//div[@data-tile-id='{tile_id}']/ancestor::div[contains(@class,'sc-5c6add13-2')][1]"
-        )
-        return card
-    except Exception:
-        pass
-
-    return None
+        return None
 
 
 def _obter_percentual_card(card):
     try:
-        span = card.find_element(By.XPATH, ".//div[contains(@class,'sc-55ebc859-7')]")
+        span = card.find_element(
+            By.XPATH,
+            ".//span[contains(text(), '%')]"
+        )
         texto = span.text.strip()
         return texto if texto else None
     except NoSuchElementException:
@@ -554,11 +540,9 @@ def aguardar_geracao_video(driver, prompt: str, timeout=300):
             card = _encontrar_card_por_tile_id(driver, tile_id)
 
         if not card:
-            # Segue a lógica do Guru: card mais recente é o do vídeo atual
             card = _card_mais_recente(driver)
 
         if not card:
-            # Fallback extremo: tentar pelo prompt
             card = _encontrar_card_por_prompt(driver, prompt)
 
         if card and not tile_id:
@@ -598,6 +582,7 @@ def aguardar_geracao_video(driver, prompt: str, timeout=300):
 # ==========================
 #   DOWNLOAD E CONCLUSÃO
 # ==========================
+
 
 def abrir_video_pronto(driver, tile_id: str | None = None, prompt: str | None = None):
     _log("[HUMBLE] Abrindo página do vídeo pronto...")
@@ -713,8 +698,8 @@ def baixar_video_720p(
     destino_dir: Path | None = None,
     nome_arquivo: str | None = None,
 ):
-    download_dir = Path(DOWNLOAD_DIR)         # pasta temporária do .env
-    destino_dir = Path(destino_dir or DOWNLOAD_DIR)  # pasta final (personagem) ou mesma
+    download_dir = Path(DOWNLOAD_DIR)
+    destino_dir = Path(destino_dir or DOWNLOAD_DIR)
 
     download_dir.mkdir(parents=True, exist_ok=True)
     destino_dir.mkdir(parents=True, exist_ok=True)
