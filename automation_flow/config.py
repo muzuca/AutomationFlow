@@ -25,3 +25,29 @@ TESSERACT_PATH = os.getenv(
 # Pasta para salvar prints de debug OCR
 OCR_DEBUG_DIR = PROJECT_ROOT / "ocr_debug"
 OCR_DEBUG_DIR.mkdir(exist_ok=True)
+
+def carregar_contas_humble() -> list[dict]:
+    contas = []
+    idx = 1
+
+    while True:
+        email = os.getenv(f"HUMBLE_EMAIL_{idx}")
+        senha = os.getenv(f"HUMBLE_PASSWORD_{idx}")
+
+        if not email and not senha:
+            break
+
+        if email and senha:
+            contas.append({
+                "indice": idx,
+                "email": email,
+                "senha": senha,
+            })
+
+        idx += 1
+
+    return contas
+
+
+HUMBLE_ACCOUNTS = carregar_contas_humble()
+HUMBLE_FLOW_URL = os.getenv("HUMBLE_FLOW_URL", "https://labs.google/fx/pt/tools/flow")
