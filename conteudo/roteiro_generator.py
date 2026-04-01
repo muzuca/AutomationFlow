@@ -14,13 +14,8 @@ Uso:
 """
 
 import json
-import os
 import time
-from pathlib import Path
-
-from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+from typing import Dict, List
 
 from .personagens.ana_cartomante import (
     AUDIO_BLOCK,
@@ -33,29 +28,13 @@ from .personagens.ana_cartomante import (
     TECH_BLOCK,
     VOICE_STYLE,
 )
-
-# ── Config ───────────────────────────────────────────────────────────────────
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(PROJECT_ROOT / ".env")
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL   = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+from automation_flow.gemini_client import gerar_com_rotacao_json
 
 
 # ── Helpers internos ─────────────────────────────────────────────────────────
 
-def _criar_cliente() -> genai.Client:
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY não definida no arquivo .env")
-    return genai.Client(api_key=GEMINI_API_KEY)
-
 
 def _montar_prompt_veo3(cena: dict, dialogo: str) -> str:
-    """
-    Monta o prompt final no formato exato esperado pelo Veo 3,
-    combinando os blocos fixos da personagem com o diálogo gerado pelo Gemini.
-    """
     dialogo_seguro = dialogo.replace('"', "'")
     return (
         f"Subject: A hyper-realistic cinematic selfie video of a Brazilian fortune teller "
@@ -78,10 +57,6 @@ def _contar_palavras(texto: str) -> int:
 
 
 def _validar_dialogos(cenas_json: list) -> list[str]:
-    """
-    Retorna lista de avisos se algum diálogo não tiver ~22 palavras.
-    Tolerância: 20–24 palavras.
-    """
     avisos = []
     for c in cenas_json:
         n = _contar_palavras(c.get("dialogo", ""))
@@ -94,10 +69,6 @@ def _validar_dialogos(cenas_json: list) -> list[str]:
 
 
 def _parse_json_seguro(texto: str) -> dict:
-    """
-    Tenta fazer parse do JSON. Se falhar por truncamento,
-    tenta corrigir fechando chaves/colchetes faltando.
-    """
     try:
         return json.loads(texto)
     except json.JSONDecodeError:
@@ -105,7 +76,7 @@ def _parse_json_seguro(texto: str) -> dict:
 
     texto_corrigido = texto
     abertos_colchete = texto.count("[") - texto.count("]")
-    abertos_chave    = texto.count("{") - texto.count("}")
+    abertos_chave = texto.count("{") - texto.count("}")
 
     for _ in range(abertos_colchete):
         texto_corrigido += "]"
@@ -121,7 +92,6 @@ def _parse_json_seguro(texto: str) -> dict:
 
 
 def _limpar_resposta(texto: str) -> str:
-    """Remove blocos markdown e espaços desnecessários da resposta do Gemini."""
     texto = texto.strip()
     if texto.startswith("```"):
         partes = texto.split("```")
@@ -133,46 +103,29 @@ def _limpar_resposta(texto: str) -> str:
 
 # ── Geração principal ────────────────────────────────────────────────────────
 
+
 def gerar_roteiro(
     signo: str,
     tema: str,
     mensagem_central: str,
     n_cenas: int = 5,
-) -> dict:
+) -> Dict:
     """
     Gera um roteiro completo para Ana Cartomante com N cenas.
-
-    Args:
-        signo:             Ex: "Gêmeos", "Áries", "Escorpião"
-        tema:              Ex: "amor", "dinheiro", "sorte", "carreira"
-        mensagem_central:  Ex: "usar a comunicação para atrair prosperidade"
-        n_cenas:           Quantidade de cenas desejadas (1–len(ESTRUTURA_CENAS))
-
-    Returns:
-        {
-            "prompts":     list[str]  — prompts prontos para o Flow/Veo3
-            "dialogos":    list[str]  — diálogos de cada cena
-            "textos_tela": list[str]  — textos para overlay de cada cena
-            "descricao":   str        — descrição resumida para caption
-            "hashtags":    list[str]  — 3 hashtags sugeridas
-        }
     """
     if n_cenas < 1:
         raise ValueError("n_cenas deve ser pelo menos 1.")
     if n_cenas > len(ESTRUTURA_CENAS):
         raise ValueError(f"n_cenas máximo suportado é {len(ESTRUTURA_CENAS)}.")
 
-    cliente = _criar_cliente()
-
     instrucao_sistema = """Você é um especialista em criação de roteiros para vídeos virais de cartomantes no Instagram e TikTok.
 Você conhece profundamente o estilo da Ana Cartomante: energética, Carioca, carismática, direta e espiritual.
 Seus roteiros sempre geram alto engajamento porque combinam identificação emocional, revelação de dom/desafio e CTA poderoso.
 Responda SEMPRE em JSON válido, sem markdown, sem explicações fora do JSON."""
 
-    descricao_cenas = "\n".join([
-        f"Cena {c['numero']} — {c['nome']}: {c['objetivo']}"
-        for c in ESTRUTURA_CENAS
-    ])
+    descricao_cenas = "\n".join(
+        [f"Cena {c['numero']} — {c['nome']}: {c['objetivo']}" for c in ESTRUTURA_CENAS]
+    )
 
     mensagem_usuario = f"""Crie um roteiro de 5 cenas para Ana Cartomante com as seguintes informações:
 - Signo: {signo}
@@ -231,19 +184,17 @@ Retorne EXATAMENTE este JSON (sem mais nada, sem markdown):
 
     print(f"\n[ROTEIRO] Gerando roteiro — Signo: {signo} | Tema: {tema} | Cenas: {n_cenas}")
 
-    for tentativa in range(1, 4):
+    tentativas = 3
+    for tentativa in range(1, tentativas + 1):
         try:
-            resposta = cliente.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=mensagem_usuario,
-                config=types.GenerateContentConfig(
-                    system_instruction=instrucao_sistema,
-                    temperature=0.9,
-                    max_output_tokens=4096,
-                ),
+            texto_bruto = gerar_com_rotacao_json(
+                mensagem_usuario=mensagem_usuario,
+                instrucao_sistema=instrucao_sistema,
+                max_output_tokens=4096,
+                temperature=0.9,
             )
 
-            texto = _limpar_resposta(resposta.text)
+            texto = _limpar_resposta(texto_bruto)
             dados = _parse_json_seguro(texto)
 
             cenas_json = dados["cenas"][:n_cenas]
@@ -252,13 +203,13 @@ Retorne EXATAMENTE este JSON (sem mais nada, sem markdown):
             for aviso in avisos:
                 print(aviso)
 
-            prompts     = []
-            dialogos    = []
-            textos_tela = []
+            prompts: List[str] = []
+            dialogos: List[str] = []
+            textos_tela: List[str] = []
 
             for i, cena_dados in enumerate(cenas_json):
-                cena_base  = ESTRUTURA_CENAS[i]
-                dialogo    = cena_dados["dialogo"]
+                cena_base = ESTRUTURA_CENAS[i]
+                dialogo = cena_dados["dialogo"]
                 texto_tela = cena_dados["texto_tela"]
 
                 prompt_completo = _montar_prompt_veo3(cena_base, dialogo)
@@ -268,60 +219,49 @@ Retorne EXATAMENTE este JSON (sem mais nada, sem markdown):
 
                 print(
                     f"  ✔ Cena {i + 1} — {cena_base['nome']}: {texto_tela}\n"
-                    f"       Diálogo ({_contar_palavras(dialogo)} palavras): {dialogo}"
+                    f"     Diálogo ({_contar_palavras(dialogo)} palavras): {dialogo}"
                 )
 
             print(f"\n  📝 Descrição: {dados['descricao']}")
             print(f"  🏷  Hashtags:  {' '.join(dados['hashtags'])}")
 
             return {
-                "prompts":     prompts,
-                "dialogos":    dialogos,
+                "prompts": prompts,
+                "dialogos": dialogos,
                 "textos_tela": textos_tela,
-                "descricao":   dados["descricao"],
-                "hashtags":    dados["hashtags"],
+                "descricao": dados["descricao"],
+                "hashtags": dados["hashtags"],
             }
 
         except json.JSONDecodeError as e:
-            print(f"  ⚠ Tentativa {tentativa}/3 — JSON inválido: {e}")
-            print(f"  ℹ Início da resposta: {resposta.text[:200]!r}")
-            if tentativa < 3:
+            print(f"  ⚠ Tentativa {tentativa}/{tentativas} — JSON inválido: {e}")
+            print(f"  ℹ Início da resposta: {texto_bruto[:200]!r}")
+            if tentativa < tentativas:
                 time.sleep(3)
 
         except Exception as e:
-            print(f"  ⚠ Tentativa {tentativa}/3 falhou: {e}")
-            if tentativa < 3:
+            print(f"  ⚠ Tentativa {tentativa}/{tentativas} falhou: {e}")
+            if tentativa < tentativas:
                 time.sleep(3)
 
     raise RuntimeError(
-        f"Não foi possível gerar o roteiro para {signo}/{tema} após 3 tentativas."
+        f"Não foi possível gerar o roteiro para {signo}/{tema} após {tentativas} tentativas."
     )
 
 
 # ── Geração em lote ──────────────────────────────────────────────────────────
+
 
 def gerar_multiplos_roteiros(
     signo: str,
     temas: list[str],
     mensagens: list[str],
     n_cenas: int = 5,
-) -> list[dict]:
-    """
-    Gera um roteiro completo para cada par (tema, mensagem).
-
-    Args:
-        signo:     Signo comum a todos os roteiros
-        temas:     Lista de temas  Ex: ["amor", "dinheiro", "carreira"]
-        mensagens: Lista de mensagens centrais (mesmo tamanho que temas)
-        n_cenas:   Quantidade de cenas por roteiro
-
-    Returns:
-        Lista de dicts, cada um no formato de gerar_roteiro()
-    """
+) -> list[Dict]:
     if len(temas) != len(mensagens):
         raise ValueError("temas e mensagens devem ter o mesmo número de itens.")
 
-    roteiros = []
+    roteiros: list[Dict] = []
     for i, (tema, mensagem) in enumerate(zip(temas, mensagens), start=1):
         print(f"\n{'='*50}")
         print(f"  ROTEIRO {i}/{len(temas)} — {signo} | {tema}")
