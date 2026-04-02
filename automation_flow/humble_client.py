@@ -96,7 +96,6 @@ def criar_driver_humble(download_dir: Path | None = None):
     download_dir = Path(download_dir or DOWNLOAD_DIR)
 
     opts = Options()
-    opts.add_argument("--start-maximized")
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-logging")
@@ -125,7 +124,8 @@ def criar_driver_humble(download_dir: Path | None = None):
     )
 
     driver = webdriver.Chrome(service=service, options=opts)
-    driver.maximize_window()
+    # NÃO força maximizar, deixa o Chrome usar o último estado salvo pelo próprio Windows
+    # driver.maximize_window()
     return driver
 
 
