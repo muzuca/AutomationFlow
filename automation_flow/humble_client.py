@@ -18,16 +18,16 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException
 
 from .config import (
     CHROMEDRIVER_PATH,
-    DOWNLOAD_DIR,   # pasta temporária vinda do .env (DOWNLOADS_DIR)
+    DOWNLOAD_DIR,
     WAIT,
     HUMBLE_FLOW_URL,
 )
 
-DEBUG_NAO_FECHAR = True  # não fecha browser nem troca de conta ao falhar
+DEBUG_NAO_FECHAR = False
 
 
 class HumbleFlowError(RuntimeError):
@@ -41,6 +41,10 @@ def _ts() -> str:
 def _log(msg: str):
     print(f"[{_ts()}] {msg}")
 
+
+# ============================================================================
+#   DRIVER
+# ============================================================================
 
 def criar_driver_humble(download_dir: Path | None = None):
     download_dir = Path(download_dir or DOWNLOAD_DIR)
@@ -96,6 +100,10 @@ def _wait_visible(driver, by, value, timeout=WAIT, descricao="elemento"):
     return el
 
 
+# ============================================================================
+#   LOGIN + PREPARO
+# ============================================================================
+
 def abrir_flow(driver):
     _log(f"[HUMBLE] Abrindo Flow: {HUMBLE_FLOW_URL}")
     driver.get(HUMBLE_FLOW_URL)
@@ -122,7 +130,6 @@ def fazer_login_google(driver, email: str, senha: str):
     campo_email.clear()
     campo_email.send_keys(email)
 
-    # Avançar / Next e-mail (id estável + fallback por texto)
     _wait_click(
         driver,
         By.XPATH,
@@ -145,7 +152,6 @@ def fazer_login_google(driver, email: str, senha: str):
     campo_senha.clear()
     campo_senha.send_keys(senha)
 
-    # Avançar / Next senha
     _wait_click(
         driver,
         By.XPATH,
@@ -163,39 +169,93 @@ def fazer_login_google(driver, email: str, senha: str):
 
 def aguardar_flow_pronto(driver):
     _log("[HUMBLE] Aguardando tela do Flow ficar pronta...")
-    candidatos = [
-        "//button[contains(., 'Novo projeto')]",
-        "//button[contains(., 'Nano Banana 2')]",
-        "//div[@role='textbox' and @contenteditable='true']",
-    ]
-
     fim = time.time() + 40
     while time.time() < fim:
-        for xp in candidatos:
-            try:
-                el = driver.find_element(By.XPATH, xp)
-                if el.is_displayed():
-                    _log("✔ Flow pronto.")
-                    return True
-            except Exception:
-                pass
-        time.sleep(2)
-
+        try:
+            # qualquer coisa do header principal serve pra saber que carregou
+            driver.find_element(By.XPATH, "//header | //button[contains(., 'Novo projeto')]")
+            _log("✔ Flow pronto.")
+            return
+        except Exception:
+            time.sleep(2)
     raise HumbleFlowError("Flow não ficou pronto após login.")
 
 
-def garantir_novo_projeto(driver):
-    _log("[HUMBLE] Garantindo tela de novo projeto...")
+def _fechar_popup_login_chrome():
+    _log("[HUMBLE] Tentando fechar popup 'Fazer login no Chrome' (clique + ESC)...")
     try:
-        btn = WebDriverWait(driver, 8).until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Novo projeto')]"))
-        )
-        btn.click()
-        _log("✔ Clicado em 'Novo projeto'.")
-        time.sleep(3)
-    except TimeoutException:
-        _log("ℹ 'Novo projeto' não apareceu; assumindo que já está na tela certa.")
+        wins = [w for w in gw.getWindowsWithTitle("Flow -")]
+        if wins:
+            wins[0].activate()
+            time.sleep(0.5)
+    except Exception:
+        pass
 
+    screen_w, screen_h = pyautogui.size()
+    cx = int(screen_w * 0.5)
+    cy = int(screen_h * 0.4)
+    pyautogui.moveTo(cx, cy, duration=0.1)
+    pyautogui.click()
+    time.sleep(0.2)
+    pyautogui.press("esc")
+    time.sleep(1)
+
+
+def clicar_novo_projeto(driver):
+    """
+    Clica no botão real de 'Novo projeto' do header do Flow.
+    """
+    _log("[HUMBLE] Clicando em 'Novo projeto'...")
+
+    xpaths = [
+        "//button[.//i[normalize-space()='add_2'] and contains(., 'Novo projeto')]",
+        "//button[contains(@class,'sc-a38764c7-0') and .//i[normalize-space()='add_2'] and contains(., 'Novo projeto')]",
+        "//button[.//div[@data-type='button-overlay'] and .//i[normalize-space()='add_2'] and contains(., 'Novo projeto')]",
+        "//button[contains(., 'Novo projeto')]",
+    ]
+
+    ultimo_erro = None
+
+    for xp in xpaths:
+        try:
+            btn = WebDriverWait(driver, 8).until(
+                EC.element_to_be_clickable((By.XPATH, xp))
+            )
+            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+            time.sleep(0.5)
+
+            try:
+                btn.click()
+            except Exception:
+                driver.execute_script("arguments[0].click();", btn)
+
+            _log("✔ Clicado em 'Novo projeto'.")
+            time.sleep(3)
+            return
+        except Exception as e:
+            ultimo_erro = e
+
+    _log("❌ Não achei/clicou o botão 'Novo projeto' após o login.")
+    if DEBUG_NAO_FECHAR:
+        input("DEBUG: ENTER depois de olhar o Flow...")
+    raise HumbleFlowError(f"Não achei o botão 'Novo projeto' após o login: {ultimo_erro}")
+
+
+def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
+    abrir_flow(driver)
+    clicar_create_with_flow(driver)
+    fazer_login_google(driver, email, senha)
+
+    _fechar_popup_login_chrome()
+
+    aguardar_flow_pronto(driver)
+    clicar_novo_projeto(driver)
+    abrir_chip_nano(driver)
+    configurar_nano_video_9x16_x1_fast(driver)
+
+# ============================================================================
+#   NANO / PROMPT / RESTO (igual antes)
+# ============================================================================
 
 def abrir_chip_nano(driver):
     _log("[HUMBLE] Abrindo chip Nano Banana 2...")
@@ -258,9 +318,6 @@ def configurar_nano_video_9x16_x1_fast(driver):
     time.sleep(1)
 
 
-# ============ DEBUG PROMPT ============
-
-
 def _ler_texto_prompt_box(box):
     try:
         txt = box.get_attribute("innerText")
@@ -282,16 +339,6 @@ def _debug_dump_cards(driver):
         except Exception:
             tid = None
         _log(f"[DEBUG CARDS] #{idx} tile_id={tid} texto={txt!r}")
-
-
-def _limpar_prompt_box(box):
-    try:
-        box.send_keys(Keys.CONTROL, "a")
-        time.sleep(0.2)
-        box.send_keys(Keys.BACKSPACE)
-        time.sleep(0.3)
-    except Exception:
-        pass
 
 
 def preencher_prompt(driver, prompt: str):
@@ -362,40 +409,9 @@ def clicar_criar(driver):
     time.sleep(2)
     _debug_dump_cards(driver)
 
-
-def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
-    abrir_flow(driver)
-    clicar_create_with_flow(driver)
-    fazer_login_google(driver, email, senha)
-
-    _log("[HUMBLE] Tentando fechar popup 'Fazer login no Chrome' (clique + ESC)...")
-    try:
-        wins = [w for w in gw.getWindowsWithTitle("Flow -")]
-        if wins:
-            wins[0].activate()
-            time.sleep(0.5)
-    except Exception:
-        pass
-
-    screen_w, screen_h = pyautogui.size()
-    cx = int(screen_w * 0.5)
-    cy = int(screen_h * 0.4)
-    pyautogui.moveTo(cx, cy, duration=0.1)
-    pyautogui.click()
-    time.sleep(0.2)
-    pyautogui.press("esc")
-    time.sleep(1)
-
-    aguardar_flow_pronto(driver)
-    garantir_novo_projeto(driver)
-    abrir_chip_nano(driver)
-    configurar_nano_video_9x16_x1_fast(driver)
-
-
-# ==========================
+# ============================================================================
 #   MONITOR DE GERAÇÃO
-# ==========================
-
+# ============================================================================
 
 ERRO_KEYWORDS = ["Falha", "Erro", "Violação"]
 
@@ -497,9 +513,6 @@ def _encontrar_card_por_tile_id(driver, tile_id: str):
         return card
     except Exception:
         return None
-
-
-# ====== NOVA LÓGICA DE ESTADO DO CARD (SEM DEPENDER DE %) ======
 
 
 def _texto_card(card) -> str:
@@ -670,10 +683,9 @@ def aguardar_geracao_video(driver, prompt: str, timeout=420):
     raise HumbleFlowError("Timeout aguardando geração do vídeo.")
 
 
-# ==========================
-#   DOWNLOAD E CONCLUSÃO
-# ==========================
-
+# ============================================================================
+#   DOWNLOAD / CONCLUSÃO
+# ============================================================================
 
 def abrir_video_pronto(driver, tile_id: str | None = None, prompt: str | None = None):
     _log("[HUMBLE] Abrindo página do vídeo pronto...")
@@ -690,8 +702,7 @@ def abrir_video_pronto(driver, tile_id: str | None = None, prompt: str | None = 
     if not card:
         _log("[HUMBLE] ERRO: Não encontrei card do vídeo pronto.")
         if DEBUG_NAO_FECHAR:
-            _log("DEBUG_NAO_FECHAR=True → browser mantido aberto para inspeção.")
-            input("DEBUG: Aperte ENTER no console depois de olhar o Flow...")
+            input("DEBUG: ENTER depois de olhar o Flow...")
         raise HumbleFlowError("Não encontrei card do vídeo pronto.")
 
     _log("[HUMBLE] Card do vídeo localizado, procurando elemento clicável...")
@@ -716,8 +727,7 @@ def abrir_video_pronto(driver, tile_id: str | None = None, prompt: str | None = 
     if alvo_click is None:
         _log("[HUMBLE] ERRO: Encontrei o card, mas não achei botão/vídeo clicável.")
         if DEBUG_NAO_FECHAR:
-            _log("DEBUG_NAO_FECHAR=True → browser mantido aberto para inspeção.")
-            input("DEBUG: Aperte ENTER no console depois de olhar o Flow...")
+            input("DEBUG: ENTER depois de olhar o Flow...")
         raise HumbleFlowError("Encontrei o card, mas não achei elemento clicável (botão/vídeo).")
 
     driver.execute_script(

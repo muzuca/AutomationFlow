@@ -1,10 +1,10 @@
 """
-Gerador de roteiros completos para Ana Cartomante via Gemini API.
+Gerador de roteiros completos via Gemini API, suportando múltiplos personagens.
 
-Uso:
-    from conteudo.roteiro_generator import gerar_roteiro
+Uso típico (Ana):
+    from conteudo.roteiro_generator import gerar_roteiro_ana
 
-    roteiro = gerar_roteiro(
+    roteiro = gerar_roteiro_ana(
         signo="Gêmeos",
         tema="comunicação e prosperidade",
         mensagem_central="usar a comunicação como dom para atrair sorte e dinheiro",
@@ -13,50 +13,81 @@ Uso:
     prompts = roteiro["prompts"]   # list[str] — prompts prontos para o Flow
 """
 
-import json
-import time
 from typing import Dict, List
 
 from .personagens.ana_cartomante import (
-    AUDIO_BLOCK,
-    BACKGROUND_BLOCK,
-    CHARACTER_BLOCK,
-    ESTRUTURA_CENAS,
-    LIGHTING_BLOCK,
-    NOME,
-    STYLE_BLOCK,
-    TECH_BLOCK,
-    VOICE_STYLE,
+    AUDIO_BLOCK as ANA_AUDIO_BLOCK,
+    BACKGROUND_BLOCK as ANA_BACKGROUND_BLOCK,
+    CHARACTER_BLOCK as ANA_CHARACTER_BLOCK,
+    ESTRUTURA_CENAS as ANA_ESTRUTURA_CENAS,
+    LIGHTING_BLOCK as ANA_LIGHTING_BLOCK,
+    NOME as ANA_NOME,
+    STYLE_BLOCK as ANA_STYLE_BLOCK,
+    TECH_BLOCK as ANA_TECH_BLOCK,
+    VOICE_STYLE as ANA_VOICE_STYLE,
 )
-from automation_flow.gemini_client import gerar_com_rotacao_json
+
+from .personagens.coach_espiritual import (
+    AUDIO_BLOCK as COACH_AUDIO_BLOCK,
+    BACKGROUND_BLOCK as COACH_BACKGROUND_BLOCK,
+    CHARACTER_BLOCK as COACH_CHARACTER_BLOCK,
+    ESTRUTURA_CENAS as COACH_ESTRUTURA_CENAS,
+    LIGHTING_BLOCK as COACH_LIGHTING_BLOCK,
+    NOME as COACH_NOME,
+    STYLE_BLOCK as COACH_STYLE_BLOCK,
+    TECH_BLOCK as COACH_TECH_BLOCK,
+    VOICE_STYLE as COACH_VOICE_STYLE,
+)
+
+from .roteiro_core import (
+    gerar_roteiro_generico,
+    _contar_palavras,
+)
 
 
-# ── Helpers internos ─────────────────────────────────────────────────────────
+# ── MONTADORES DE PROMPT VEO3 ────────────────────────────────────────────────
 
 
-def _montar_prompt_veo3(cena: dict, dialogo: str) -> str:
+def _montar_prompt_veo3_ana(cena: dict, dialogo: str) -> str:
     dialogo_seguro = dialogo.replace('"', "'")
     return (
-        f"Subject: A hyper-realistic cinematic selfie video of a Brazilian fortune teller "
-        f"named {NOME} walking through an open city square with colorful trees and a central "
+        "Subject: A hyper-realistic cinematic selfie video of a Brazilian fortune teller "
+        f"named {ANA_NOME} walking through an open city square with colorful trees and a central "
         f"fountain during golden hour, {cena['subject_suffix']}\n\n"
-        f"{CHARACTER_BLOCK}\n\n"
-        f"{BACKGROUND_BLOCK}\n\n"
-        f"{LIGHTING_BLOCK}\n\n"
+        f"{ANA_CHARACTER_BLOCK}\n\n"
+        f"{ANA_BACKGROUND_BLOCK}\n\n"
+        f"{ANA_LIGHTING_BLOCK}\n\n"
         f"Action: {cena['action']}\n\n"
-        f"{STYLE_BLOCK}\n\n"
-        f"Dialogue: spoken in Brazilian Portuguese [{VOICE_STYLE}, {cena['tone']}]\n"
-        f'"{dialogo_seguro}"\n\n'
-        f"{AUDIO_BLOCK}\n"
-        f"{TECH_BLOCK}"
+        f"{ANA_STYLE_BLOCK}\n\n"
+        f"Dialogue: spoken in Brazilian Portuguese [{ANA_VOICE_STYLE}, {cena['tone']}]\n"
+        f"\"{dialogo_seguro}\"\n\n"
+        f"{ANA_AUDIO_BLOCK}\n"
+        f"{ANA_TECH_BLOCK}"
     )
 
 
-def _contar_palavras(texto: str) -> int:
-    return len(texto.split())
+def _montar_prompt_veo3_coach(cena: dict, dialogo: str) -> str:
+    dialogo_seguro = dialogo.replace('"', "'")
+    return (
+        "Subject: A hyper-realistic cinematic video of a serene Brazilian spiritual life coach "
+        f"named {COACH_NOME} standing in a small cozy apartment kitchen in the early morning, "
+        f"{cena['subject_suffix']}\n\n"
+        f"{COACH_CHARACTER_BLOCK}\n\n"
+        f"{COACH_BACKGROUND_BLOCK}\n\n"
+        f"{COACH_LIGHTING_BLOCK}\n\n"
+        f"Action: {cena['action']}\n\n"
+        f"{COACH_STYLE_BLOCK}\n\n"
+        f"Dialogue: spoken in Brazilian Portuguese [{COACH_VOICE_STYLE}, {cena['tone']}]\n"
+        f"\"{dialogo_seguro}\"\n\n"
+        f"{COACH_AUDIO_BLOCK}\n"
+        f"{COACH_TECH_BLOCK}"
+    )
 
 
-def _validar_dialogos(cenas_json: list) -> list[str]:
+# ── VALIDAÇÃO DE DIÁLOGOS ───────────────────────────────────────────────────
+
+
+def _validar_dialogos_ana(cenas_json: list) -> list[str]:
     avisos = []
     for c in cenas_json:
         n = _contar_palavras(c.get("dialogo", ""))
@@ -68,43 +99,22 @@ def _validar_dialogos(cenas_json: list) -> list[str]:
     return avisos
 
 
-def _parse_json_seguro(texto: str) -> dict:
-    try:
-        return json.loads(texto)
-    except json.JSONDecodeError:
-        pass
-
-    texto_corrigido = texto
-    abertos_colchete = texto.count("[") - texto.count("]")
-    abertos_chave = texto.count("{") - texto.count("}")
-
-    for _ in range(abertos_colchete):
-        texto_corrigido += "]"
-    for _ in range(abertos_chave):
-        texto_corrigido += "}"
-
-    try:
-        dados = json.loads(texto_corrigido)
-        print("  ⚠ JSON corrigido automaticamente (estava truncado).")
-        return dados
-    except json.JSONDecodeError as e:
-        raise e
+def _validar_dialogos_coach(cenas_json: list) -> list[str]:
+    avisos = []
+    for c in cenas_json:
+        n = _contar_palavras(c.get("dialogo", ""))
+        if n != 19:
+            avisos.append(
+                f"  ⚠ Cena {c['numero']} ({c['nome']}): {n} palavras "
+                f"(esperado 19) — '{c['dialogo'][:60]}...'"
+            )
+    return avisos
 
 
-def _limpar_resposta(texto: str) -> str:
-    texto = texto.strip()
-    if texto.startswith("```"):
-        partes = texto.split("```")
-        texto = partes[1]
-        if texto.startswith("json"):
-            texto = texto[4:]
-    return texto.strip()
+# ── GERADORES ESPECÍFICOS DE ROTEIRO ────────────────────────────────────────
 
 
-# ── Geração principal ────────────────────────────────────────────────────────
-
-
-def gerar_roteiro(
+def gerar_roteiro_ana(
     signo: str,
     tema: str,
     mensagem_central: str,
@@ -113,18 +123,13 @@ def gerar_roteiro(
     """
     Gera um roteiro completo para Ana Cartomante com N cenas.
     """
-    if n_cenas < 1:
-        raise ValueError("n_cenas deve ser pelo menos 1.")
-    if n_cenas > len(ESTRUTURA_CENAS):
-        raise ValueError(f"n_cenas máximo suportado é {len(ESTRUTURA_CENAS)}.")
-
     instrucao_sistema = """Você é um especialista em criação de roteiros para vídeos virais de cartomantes no Instagram e TikTok.
 Você conhece profundamente o estilo da Ana Cartomante: energética, Carioca, carismática, direta e espiritual.
 Seus roteiros sempre geram alto engajamento porque combinam identificação emocional, revelação de dom/desafio e CTA poderoso.
 Responda SEMPRE em JSON válido, sem markdown, sem explicações fora do JSON."""
 
     descricao_cenas = "\n".join(
-        [f"Cena {c['numero']} — {c['nome']}: {c['objetivo']}" for c in ESTRUTURA_CENAS]
+        [f"Cena {c['numero']} — {c['nome']}: {c['objetivo']}" for c in ANA_ESTRUTURA_CENAS]
     )
 
     mensagem_usuario = f"""Crie um roteiro de 5 cenas para Ana Cartomante com as seguintes informações:
@@ -182,98 +187,112 @@ Retorne EXATAMENTE este JSON (sem mais nada, sem markdown):
   "hashtags": ["#hashtag1", "#hashtag2", "#hashtag3"]
 }}"""
 
-    print(f"\n[ROTEIRO] Gerando roteiro — Signo: {signo} | Tema: {tema} | Cenas: {n_cenas}")
+    print(f"\n[ROTEIRO] Gerando roteiro — Ana | Signo: {signo} | Tema: {tema} | Cenas: {n_cenas}")
 
-    tentativas = 3
-    for tentativa in range(1, tentativas + 1):
-        try:
-            texto_bruto = gerar_com_rotacao_json(
-                mensagem_usuario=mensagem_usuario,
-                instrucao_sistema=instrucao_sistema,
-                max_output_tokens=4096,
-                temperature=0.9,
-            )
-
-            texto = _limpar_resposta(texto_bruto)
-            dados = _parse_json_seguro(texto)
-
-            cenas_json = dados["cenas"][:n_cenas]
-
-            avisos = _validar_dialogos(cenas_json)
-            for aviso in avisos:
-                print(aviso)
-
-            prompts: List[str] = []
-            dialogos: List[str] = []
-            textos_tela: List[str] = []
-
-            for i, cena_dados in enumerate(cenas_json):
-                cena_base = ESTRUTURA_CENAS[i]
-                dialogo = cena_dados["dialogo"]
-                texto_tela = cena_dados["texto_tela"]
-
-                prompt_completo = _montar_prompt_veo3(cena_base, dialogo)
-                prompts.append(prompt_completo)
-                dialogos.append(dialogo)
-                textos_tela.append(texto_tela)
-
-                print(
-                    f"  ✔ Cena {i + 1} — {cena_base['nome']}: {texto_tela}\n"
-                    f"     Diálogo ({_contar_palavras(dialogo)} palavras): {dialogo}"
-                )
-
-            print(f"\n  📝 Descrição: {dados['descricao']}")
-            print(f"  🏷  Hashtags:  {' '.join(dados['hashtags'])}")
-
-            return {
-                "prompts": prompts,
-                "dialogos": dialogos,
-                "textos_tela": textos_tela,
-                "descricao": dados["descricao"],
-                "hashtags": dados["hashtags"],
-            }
-
-        except json.JSONDecodeError as e:
-            print(f"  ⚠ Tentativa {tentativa}/{tentativas} — JSON inválido: {e}")
-            print(f"  ℹ Início da resposta: {texto_bruto[:200]!r}")
-            if tentativa < tentativas:
-                time.sleep(3)
-
-        except Exception as e:
-            print(f"  ⚠ Tentativa {tentativa}/{tentativas} falhou: {e}")
-            if tentativa < tentativas:
-                time.sleep(3)
-
-    raise RuntimeError(
-        f"Não foi possível gerar o roteiro para {signo}/{tema} após {tentativas} tentativas."
+    return gerar_roteiro_generico(
+        instrucao_sistema=instrucao_sistema,
+        mensagem_usuario=mensagem_usuario,
+        estrutura_cenas=ANA_ESTRUTURA_CENAS,
+        n_cenas=n_cenas,
+        builder_prompt_veo3=_montar_prompt_veo3_ana,
+        validar_dialogos=_validar_dialogos_ana,
     )
 
 
-# ── Geração em lote ──────────────────────────────────────────────────────────
+def gerar_roteiro_coach(
+    tema: str,
+    mensagem_central: str,
+    n_cenas: int = 3,
+) -> Dict:
+    """
+    Gera um roteiro completo para o Coach Espiritual com N cenas (padrão 3).
+    Cada diálogo deve ter exatamente 19 palavras.
+    """
+    instrucao_sistema = """Você é um especialista em criação de roteiros curtos e profundos para um Coach Espiritual brasileiro.
+O Coach fala sobre superação, amor, fé e Deus, sempre com mensagens acolhedoras e bíblicas.
+Os roteiros são usados em vídeos verticais curtos, com 3 cenas de 6 segundos cada.
+Responda SEMPRE em JSON válido, sem markdown, sem explicações fora do JSON."""
+
+    descricao_cenas = "\n".join(
+        [f"Cena {c['numero']} — {c['nome']}: {c['objetivo']}" for c in COACH_ESTRUTURA_CENAS]
+    )
+
+    mensagem_usuario = f"""Crie um roteiro de 3 cenas para o Coach Espiritual com as seguintes informações:
+- Tema geral: {tema}
+- Mensagem central: {mensagem_central}
+
+REGRAS OBRIGATÓRIAS:
+1. Cada diálogo deve ter EXATAMENTE 19 palavras em português brasileiro
+2. Linguagem simples, direta, espiritual, SEM jargão religioso complexo
+3. Pode citar Deus, fé, oração e versículos de forma natural (sem referência numérica exata obrigatória)
+4. Cada texto_tela: máximo 6 palavras, pode ter 1 emoji relevante
+5. Progressão emocional: reconhecimento da dor → perspectiva em Deus → convite para respirar, entregar e seguir
+6. No final da cena 3, peça para a pessoa comentar "Amém" ou algo de concordância
+
+ESTRUTURA DAS CENAS:
+{descricao_cenas}
+
+Retorne EXATAMENTE este JSON (sem mais nada, sem markdown):
+{{
+  "cenas": [
+    {{
+      "numero": 1,
+      "nome": "O Peso da Manhã",
+      "texto_tela": "TEXTO CURTO + EMOJI",
+      "dialogo": "exatamente 19 palavras aqui"
+    }},
+    {{
+      "numero": 2,
+      "nome": "Um Dia de Cada Vez",
+      "texto_tela": "TEXTO CURTO + EMOJI",
+      "dialogo": "exatamente 19 palavras aqui"
+    }},
+    {{
+      "numero": 3,
+      "nome": "Respira e Entrega",
+      "texto_tela": "TEXTO CURTO + EMOJI",
+      "dialogo": "exatamente 19 palavras aqui"
+    }}
+  ],
+  "descricao": "descrição resumida do roteiro para caption — máx 2 frases",
+  "hashtags": ["#hashtag1", "#hashtag2", "#hashtag3"]
+}}"""
+
+    print(f"\n[ROTEIRO] Gerando roteiro — Coach Espiritual | Tema: {tema} | Cenas: {n_cenas}")
+
+    return gerar_roteiro_generico(
+        instrucao_sistema=instrucao_sistema,
+        mensagem_usuario=mensagem_usuario,
+        estrutura_cenas=COACH_ESTRUTURA_CENAS,
+        n_cenas=n_cenas,
+        builder_prompt_veo3=_montar_prompt_veo3_coach,
+        validar_dialogos=_validar_dialogos_coach,
+    )
 
 
-def gerar_multiplos_roteiros(
+# ── GERAÇÃO EM LOTE (Apenas Ana por enquanto) ───────────────────────────────
+
+
+def gerar_multiplos_roteiros_ana(
     signo: str,
-    temas: list[str],
-    mensagens: list[str],
+    temas: List[str],
+    mensagens: List[str],
     n_cenas: int = 5,
-) -> list[Dict]:
+) -> List[Dict]:
     if len(temas) != len(mensagens):
         raise ValueError("temas e mensagens devem ter o mesmo número de itens.")
 
-    roteiros: list[Dict] = []
+    roteiros: List[Dict] = []
     for i, (tema, mensagem) in enumerate(zip(temas, mensagens), start=1):
         print(f"\n{'='*50}")
-        print(f"  ROTEIRO {i}/{len(temas)} — {signo} | {tema}")
+        print(f"  ROTEIRO {i}/{len(temas)} — Ana | {signo} | {tema}")
         print(f"{'='*50}")
-        roteiro = gerar_roteiro(
+        roteiro = gerar_roteiro_ana(
             signo=signo,
             tema=tema,
             mensagem_central=mensagem,
             n_cenas=n_cenas,
         )
         roteiros.append(roteiro)
-        if i < len(temas):
-            time.sleep(2)
 
     return roteiros

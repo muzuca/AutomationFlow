@@ -18,24 +18,71 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = PROJECT_ROOT / ".env"
 load_dotenv(ENV_PATH, override=True)
 
+# FFMPEG ----------------------------------------------------------------------
+
 _ffmpeg_env = os.getenv("FFMPEG_PATH", "ffmpeg.exe")
 FFMPEG_PATH = str(PROJECT_ROOT / _ffmpeg_env) if not os.path.isabs(_ffmpeg_env) else _ffmpeg_env
 
-GDRIVE_DIR_RAW = os.getenv("GDRIVE_ANA_CARTOMANTE", r"G:\Meu Drive\Videos\AnaCartomante")
-GDRIVE_DIR = Path(GDRIVE_DIR_RAW)
 DOWNLOADS_DIR = Path(os.getenv("DOWNLOADS_DIR", str(Path.home() / "Downloads")))
-VIDEO_PREFIX = os.getenv("VIDEO_PREFIX", "AnaCartomante")
 
 print(f"[VIDEO_MANAGER] ENV_PATH={ENV_PATH}")
-print(f"[VIDEO_MANAGER] GDRIVE_ANA_CARTOMANTE={GDRIVE_DIR_RAW}")
+print(f"[VIDEO_MANAGER] FFMPEG_PATH={FFMPEG_PATH}")
+print(f"[VIDEO_MANAGER] DOWNLOADS_DIR={DOWNLOADS_DIR}")
 
 
-def _gerar_nome_final(signo: str, tema: str) -> str:
+# ── Configuração por personagem (via .env) ───────────────────────────────────
+# Convenção:
+#   GDRIVE_<IDENT>        → pasta destino no Drive
+#   VIDEO_PREFIX_<IDENT>  → prefixo do arquivo final
+#
+# Exemplo no .env:
+#   GDRIVE_ANACARTOMANTE=G:\Meu Drive\Videos\AnaCartomante
+#   VIDEO_PREFIX_ANACARTOMANTE=AnaCartomante
+#   GDRIVE_COACHESPIRITUAL=G:\Meu Drive\Videos\CoachEspiritual
+#   VIDEO_PREFIX_COACHESPIRITUAL=CoachEspiritual
+#
+# O código só precisa do "ident" (AnaCartomante, CoachEspiritual, etc.).
+
+
+def _ident_personagem(personagem: str) -> str:
+    """
+    Normaliza o identificador usado nas variáveis de ambiente.
+    'AnaCartomante'  -> 'ANACARTOMANTE'
+    'CoachEspiritual'-> 'COACHESPIRITUAL'
+    """
+    return "".join(ch for ch in personagem if ch.isalnum()).upper()
+
+
+def _obter_config_video(personagem: str) -> tuple[Path, str]:
+    ident = _ident_personagem(personagem)
+
+    gdrive_env = f"GDRIVE_{ident}"
+    prefix_env = f"VIDEO_PREFIX_{ident}"
+
+    gdrive_raw = os.getenv(gdrive_env)
+    if not gdrive_raw:
+        raise RuntimeError(
+            f"Variável {gdrive_env} não definida no .env para o personagem '{personagem}'."
+        )
+
+    prefix = os.getenv(prefix_env, personagem)
+
+    gdrive_dir = Path(gdrive_raw)
+    print(f"[VIDEO_MANAGER] Personagem={personagem} | {gdrive_env}={gdrive_raw} | {prefix_env}={prefix}")
+    return gdrive_dir, prefix
+
+
+# ── Helpers internos ─────────────────────────────────────────────────--------
+
+
+def _gerar_nome_final(prefixo: str, signo: str | None, tema: str) -> str:
     """Gera nome do arquivo final com timestamp."""
     agora = datetime.now().strftime("%Y%m%d_%H%M%S")
-    signo_ = signo.replace(" ", "").replace("/", "")
+
+    signo_ = (signo or "").replace(" ", "").replace("/", "") or "SemSigno"
     tema_ = tema.replace(" ", "_").replace("/", "")[:30]
-    return f"{VIDEO_PREFIX}_{signo_}_{tema_}_{agora}.mp4"
+
+    return f"{prefixo}_{signo_}_{tema_}_{agora}.mp4"
 
 
 def _criar_lista_ffmpeg(arquivos: list[Path], lista_path: Path):
@@ -117,35 +164,60 @@ def _mover_para_gdrive(arquivo: Path, destino_dir: Path) -> Path | None:
         return None
 
 
+# ── API principal ────────────────────────────────────────────────────────────
+
+
 def processar_videos(
+    personagem: str,
     arquivos: list[str | Path],
-    signo: str,
     tema: str,
-    gdrive_dir: Path | None = None,
+    signo: str | None = None,
+    gdrive_dir_override: Path | None = None,
+    prefixo_override: str | None = None,
 ) -> Path | None:
     """
-    Concatena, limpa e move os vídeos gerados.
+    Concatena, limpa e move os vídeos gerados para o personagem informado.
+
+    Args:
+        personagem: nome lógico do personagem (ex: "AnaCartomante", "CoachEspiritual")
+        arquivos: lista de paths dos .mp4 gerados
+        tema: tema final usado no roteiro (vai para o nome do arquivo)
+        signo: signo (ou None, para personagens que não usam signo)
+        gdrive_dir_override: se informado, sobrescreve a pasta padrão do .env
+        prefixo_override: se informado, sobrescreve o VIDEO_PREFIX padrão
+
+    Returns:
+        Path final do arquivo no Google Drive (ou None em caso de erro)
     """
     print("\n[VIDEO MANAGER] Iniciando processamento dos vídeos...")
 
     arquivos = [Path(a) for a in arquivos]
-    destino_drive = gdrive_dir or GDRIVE_DIR
+
+    try:
+        gdrive_dir_default, prefixo_default = _obter_config_video(personagem)
+    except RuntimeError as e:
+        print(f"  ⚠ Configuração de vídeo não encontrada: {e}")
+        return None
+
+    destino_drive = gdrive_dir_override or gdrive_dir_default
+    prefixo = prefixo_override or prefixo_default
 
     faltando = [a for a in arquivos if not a.exists()]
     if faltando:
         print(f"  ❌ Arquivos não encontrados: {[str(a) for a in faltando]}")
         return None
 
+    print(f"  ℹ Personagem: {personagem}")
     print(f"  ℹ {len(arquivos)} arquivo(s) para processar:")
     for i, a in enumerate(arquivos, 1):
         print(f"     {i}. {a.name}")
 
     if len(arquivos) == 1:
         print("  ℹ Apenas 1 arquivo — pulando concatenação.")
-        video_final = arquivos[0].parent / _gerar_nome_final(signo, tema)
+        video_final = arquivos[0].parent / _gerar_nome_final(prefixo, signo, tema)
         arquivos[0].rename(video_final)
     else:
-        video_final = DOWNLOADS_DIR / _gerar_nome_final(signo, tema)
+        video_final = DOWNLOADS_DIR / _gerar_nome_final(prefixo, signo, tema)
         ok = _concatenar_ffmpeg(arquivos, video_final)
         if not ok:
             print("  ❌ Falha na concatenação. Arquivos originais mantidos.")

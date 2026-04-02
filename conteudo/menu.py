@@ -1,15 +1,22 @@
 # conteudo/menu.py
 # Menu interativo de configuração da sessão de geração.
 
-from .temas import temas_disponiveis, TEMAS_POR_PERSONAGEM
+from .temas import (
+    temas_disponiveis,
+    personagens_disponiveis,
+    usa_signos,
+)
 
-PERSONAGENS_DISPONIVEIS = list(TEMAS_POR_PERSONAGEM.keys())
+
+PERSONAGENS_DISPONIVEIS = personagens_disponiveis()
+
 NOMES_EXIBICAO = {
     "AnaCartomante": "Ana Cartomante",
+    "CoachEspiritual": "Coach Espiritual",
 }
 
 
-def linha(char="=", largura=52):
+def linha(char: str = "=", largura: int = 52):
     print(char * largura)
 
 
@@ -61,7 +68,7 @@ def selecionar_personagens() -> list[str]:
             return PERSONAGENS_DISPONIVEIS.copy()
         try:
             indices = [int(x.strip()) for x in entrada.split(",")]
-            selecionados = []
+            selecionados: list[str] = []
             for idx in indices:
                 if 1 <= idx <= len(PERSONAGENS_DISPONIVEIS):
                     selecionados.append(PERSONAGENS_DISPONIVEIS[idx - 1])
@@ -146,11 +153,11 @@ def selecionar_motor() -> str:
 def exibir_menu() -> dict:
     cabecalho("AUTOMAÇÃO DE VÍDEOS — CONFIGURAÇÃO DA SESSÃO")
 
-    # ── 1. Motor de geração ───────────────────────────────────  ← PRIMEIRO
+    # 1. Motor de geração
     linha("-", 52)
     motor = selecionar_motor()
 
-    # ── 2. Modo de execução ───────────────────────────────────
+    # 2. Modo de execução
     linha("-", 52)
     print("  MODO DE EXECUÇÃO")
     print("  1. Contínuo — gera em loop até ser encerrado (padrão)")
@@ -167,7 +174,7 @@ def exibir_menu() -> dict:
             break
         print("  Digite 1 ou 2.")
 
-    # ── 3. Quantidade de vídeos ───────────────────────────────
+    # 3. Quantidade de vídeos
     linha("-", 52)
     print("  QUANTIDADE DE VÍDEOS")
     videos_por_personagem = perguntar_int(
@@ -176,17 +183,19 @@ def exibir_menu() -> dict:
     )
     print(f"  {videos_por_personagem} vídeos por personagem.")
 
-    # ── 4. Personagens ────────────────────────────────────────
+    # 4. Personagens
     linha("-", 52)
     personagens_ids = selecionar_personagens()
 
     personagens_config = []
     for pid in personagens_ids:
         tema = selecionar_tema(pid)
-        if tema in ("signos", "aleatorio"):
+
+        if usa_signos(pid):
             signo = selecionar_signo(pid)
         else:
             signo = None
+
         cenas_por_video = perguntar_int(
             f"  Quantas cenas por vídeo para {NOMES_EXIBICAO.get(pid, pid)}",
             minimo=1, maximo=10, padrao=5,
@@ -199,7 +208,7 @@ def exibir_menu() -> dict:
             "cenas_por_video": cenas_por_video,
         })
 
-    # ── Resumo ────────────────────────────────────────────────
+    # Resumo
     cabecalho("RESUMO DA SESSÃO")
     print(f"  Motor:        {'Guru' if motor == 'guru' else 'Humble'}")
     print(f"  Modo:         {modo.capitalize()}")

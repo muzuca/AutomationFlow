@@ -1,5 +1,6 @@
 # humble_orchestrator.py
 
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -10,6 +11,10 @@ from .humble_client import (
     gerar_video_humble,
     HumbleFlowError,
 )
+
+
+MAX_TENTATIVAS_MESMO_FLOW = 3
+ESPERA_ENTRE_TENTATIVAS_S = 5
 
 
 def ts() -> str:
@@ -24,6 +29,9 @@ def _abrir_conta(conta: dict):
     """
     Abre uma conta do Humble já logada e preparada no Flow.
     Retorna o driver pronto para gerar.
+
+    Se a preparação falhar, a exceção sobe e a conta é descartada
+    para esta cena.
     """
     idx = conta["indice"]
     email = conta["email"]
@@ -46,15 +54,70 @@ def _fechar_driver(driver):
             pass
 
 
+def _tentar_gerar_na_mesma_sessao(
+    driver,
+    conta: dict,
+    prompt: str,
+    idx_prompt: int,
+) -> Path | None:
+    """
+    Tenta gerar a mesma cena no MESMO Flow até MAX_TENTATIVAS_MESMO_FLOW vezes.
+    Entre tentativas, espera alguns segundos e reenvia o prompt.
+    Retorna o Path do arquivo se conseguir, ou None se esgotar as tentativas.
+    """
+    for tentativa in range(1, MAX_TENTATIVAS_MESMO_FLOW + 1):
+        try:
+            _log(
+                f"[CONTA #{conta['indice']}] Tentativa "
+                f"{tentativa}/{MAX_TENTATIVAS_MESMO_FLOW} da cena {idx_prompt} "
+                f"no mesmo Flow..."
+            )
+            arquivo = gerar_video_humble(driver, prompt)
+
+            if arquivo:
+                _log(
+                    f"[CONTA #{conta['indice']}] Cena {idx_prompt} concluída "
+                    f"na tentativa {tentativa}."
+                )
+                return arquivo
+
+            _log(
+                f"⚠ Conta #{conta['indice']} não retornou arquivo na tentativa "
+                f"{tentativa}/{MAX_TENTATIVAS_MESMO_FLOW}."
+            )
+
+        except Exception as e:
+            _log(
+                f"❌ Conta #{conta['indice']} falhou na cena {idx_prompt} "
+                f"(tentativa {tentativa}/{MAX_TENTATIVAS_MESMO_FLOW}): {e}"
+            )
+
+        if tentativa < MAX_TENTATIVAS_MESMO_FLOW:
+            _log(
+                f"[CONTA #{conta['indice']}] Aguardando "
+                f"{ESPERA_ENTRE_TENTATIVAS_S}s para ressubmeter o mesmo prompt "
+                f"no mesmo Flow..."
+            )
+            time.sleep(ESPERA_ENTRE_TENTATIVAS_S)
+
+    _log(
+        f"❌ Conta #{conta['indice']} esgotou "
+        f"{MAX_TENTATIVAS_MESMO_FLOW} tentativas no mesmo Flow "
+        f"para a cena {idx_prompt}."
+    )
+    return None
+
+
 def main(prompts: list[str]) -> list[Path]:
     """
     Ponto de entrada do Humble.
 
-    Lógica espelhada do Guru:
+    Regras:
     - processa uma cena por vez;
     - mantém uma sessão/conta atual aberta;
-    - tenta primeiro na sessão atual;
-    - se falhar, fecha essa sessão e rotaciona para a próxima conta;
+    - para cada cena:
+        - tenta até 3 vezes no MESMO Flow da sessão atual;
+        - se mesmo assim falhar, fecha essa sessão e rotaciona para a próxima conta;
     - só passa para a próxima cena depois que a atual der certo.
     """
     print("=" * 55)
@@ -81,40 +144,35 @@ def main(prompts: list[str]) -> list[Path]:
         _log(f"Prompt: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
 
         gerou = False
-        contas_tentadas_consecutivas = 0
+        contas_tentadas_nesta_cena = 0
 
         while not gerou:
-            # Tenta primeiro na conta já aberta
+            # 1) tenta primeiro na conta/sessão já aberta
             if driver_atual is not None and conta_atual is not None:
-                try:
-                    _log(f"[CONTA #{conta_atual['indice']}] Tentando gerar a cena atual...")
-                    arquivo = gerar_video_humble(driver_atual, prompt)
+                arquivo = _tentar_gerar_na_mesma_sessao(
+                    driver=driver_atual,
+                    conta=conta_atual,
+                    prompt=prompt,
+                    idx_prompt=idx_prompt,
+                )
 
-                    if arquivo:
-                        arquivos_baixados.append(arquivo)
-                        _log(f"✔ Cena {idx_prompt} baixada: {arquivo.name}")
-                        gerou = True
-                        contas_tentadas_consecutivas = 0
-                        break
+                if arquivo:
+                    arquivos_baixados.append(arquivo)
+                    _log(f"✔ Cena {idx_prompt} baixada: {arquivo.name}")
+                    gerou = True
+                    break
 
-                    _log(f"⚠ Conta #{conta_atual['indice']} não retornou arquivo. Rotacionando conta...")
-                    _fechar_driver(driver_atual)
-                    driver_atual = None
-                    conta_atual = None
+                _log(
+                    f"⚠ Conta #{conta_atual['indice']} falhou após "
+                    f"{MAX_TENTATIVAS_MESMO_FLOW} tentativas no mesmo Flow. "
+                    f"Fechando sessão e rotacionando conta..."
+                )
+                _fechar_driver(driver_atual)
+                driver_atual = None
+                conta_atual = None
 
-                except Exception as e:
-                    ultimo_erro = e
-                    _log(f"❌ Conta #{conta_atual['indice']} falhou na cena {idx_prompt}: {e}")
-                    _fechar_driver(driver_atual)
-                    driver_atual = None
-                    conta_atual = None
-
-            # Rotaciona para a próxima conta
-            conta = HUMBLE_ACCOUNTS[indice_conta_atual]
-            indice_conta_atual = (indice_conta_atual + 1) % total_contas
-            contas_tentadas_consecutivas += 1
-
-            if contas_tentadas_consecutivas > total_contas:
+            # 2) se não há sessão válida, abre próxima conta
+            if contas_tentadas_nesta_cena >= total_contas:
                 _log(f"ℹ Todas as {total_contas} contas foram tentadas para a cena {idx_prompt}.")
                 if ultimo_erro:
                     raise HumbleFlowError(
@@ -126,30 +184,41 @@ def main(prompts: list[str]) -> list[Path]:
                     f"em nenhuma conta."
                 )
 
+            conta = HUMBLE_ACCOUNTS[indice_conta_atual]
+            indice_conta_atual = (indice_conta_atual + 1) % total_contas
+            contas_tentadas_nesta_cena += 1
+
             try:
                 driver_atual = _abrir_conta(conta)
                 conta_atual = conta
-
-                _log(f"[CONTA #{conta_atual['indice']}] Gerando a cena {idx_prompt}...")
-                arquivo = gerar_video_humble(driver_atual, prompt)
-
-                if arquivo:
-                    arquivos_baixados.append(arquivo)
-                    _log(f"✔ Cena {idx_prompt} baixada: {arquivo.name}")
-                    gerou = True
-                    contas_tentadas_consecutivas = 0
-                else:
-                    _log(f"⚠ Conta #{conta_atual['indice']} não retornou arquivo. Próxima conta...")
-                    _fechar_driver(driver_atual)
-                    driver_atual = None
-                    conta_atual = None
-
             except Exception as e:
                 ultimo_erro = e
-                _log(f"❌ Conta #{conta['indice']} não conseguiu gerar a cena {idx_prompt}: {e}")
+                _log(f"❌ Conta #{conta['indice']} não conseguiu preparar o Flow: {e}")
                 _fechar_driver(driver_atual)
                 driver_atual = None
                 conta_atual = None
+                continue
+
+            arquivo = _tentar_gerar_na_mesma_sessao(
+                driver=driver_atual,
+                conta=conta_atual,
+                prompt=prompt,
+                idx_prompt=idx_prompt,
+            )
+
+            if arquivo:
+                arquivos_baixados.append(arquivo)
+                _log(f"✔ Cena {idx_prompt} baixada: {arquivo.name}")
+                gerou = True
+                break
+
+            _log(
+                f"⚠ Conta #{conta_atual['indice']} não conseguiu gerar a cena {idx_prompt} "
+                f"mesmo após {MAX_TENTATIVAS_MESMO_FLOW} tentativas. Próxima conta..."
+            )
+            _fechar_driver(driver_atual)
+            driver_atual = None
+            conta_atual = None
 
         _log(f"✔ Vídeo {idx_prompt}/{len(prompts)} gerado com sucesso.")
 
