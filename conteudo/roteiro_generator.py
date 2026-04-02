@@ -15,7 +15,7 @@ Uso típico (Ana):
 
 from typing import Dict, List
 
-from .personagens.ana_cartomante import (
+from .personas.ana_cartomante import (
     AUDIO_BLOCK as ANA_AUDIO_BLOCK,
     BACKGROUND_BLOCK as ANA_BACKGROUND_BLOCK,
     CHARACTER_BLOCK as ANA_CHARACTER_BLOCK,
@@ -27,7 +27,7 @@ from .personagens.ana_cartomante import (
     VOICE_STYLE as ANA_VOICE_STYLE,
 )
 
-from .personagens.coach_espiritual import (
+from .personas.coach_espiritual import (
     AUDIO_BLOCK as COACH_AUDIO_BLOCK,
     BACKGROUND_BLOCK as COACH_BACKGROUND_BLOCK,
     CHARACTER_BLOCK as COACH_CHARACTER_BLOCK,

@@ -13,6 +13,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from automation_flow.config import get_personagem_output_dir
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = PROJECT_ROOT / ".env"
@@ -30,46 +31,24 @@ print(f"[VIDEO_MANAGER] FFMPEG_PATH={FFMPEG_PATH}")
 print(f"[VIDEO_MANAGER] DOWNLOADS_DIR={DOWNLOADS_DIR}")
 
 
-# ── Configuração por personagem (via .env) ───────────────────────────────────
-# Convenção:
-#   GDRIVE_<IDENT>        → pasta destino no Drive
-#   VIDEO_PREFIX_<IDENT>  → prefixo do arquivo final
-#
-# Exemplo no .env:
-#   GDRIVE_ANACARTOMANTE=G:\Meu Drive\Videos\AnaCartomante
-#   VIDEO_PREFIX_ANACARTOMANTE=AnaCartomante
-#   GDRIVE_COACHESPIRITUAL=G:\Meu Drive\Videos\CoachEspiritual
-#   VIDEO_PREFIX_COACHESPIRITUAL=CoachEspiritual
-#
-# O código só precisa do "ident" (AnaCartomante, CoachEspiritual, etc.).
-
+# ── Helpers de identificação/prefixo ─────────────────────────────────────────
 
 def _ident_personagem(personagem: str) -> str:
     """
-    Normaliza o identificador usado nas variáveis de ambiente.
-    'AnaCartomante'  -> 'ANACARTOMANTE'
-    'CoachEspiritual'-> 'COACHESPIRITUAL'
+    Normaliza o identificador/prefixo a partir do nome lógico do personagem.
+    'AnaCartomante'  -> 'AnaCartomante'
+    'CoachEspiritual'-> 'CoachEspiritual'
     """
-    return "".join(ch for ch in personagem if ch.isalnum()).upper()
+    # mantém só letras/números, sem espaços, para usar em nome de arquivo
+    return "".join(ch for ch in personagem if ch.isalnum())
 
 
-def _obter_config_video(personagem: str) -> tuple[Path, str]:
-    ident = _ident_personagem(personagem)
-
-    gdrive_env = f"GDRIVE_{ident}"
-    prefix_env = f"VIDEO_PREFIX_{ident}"
-
-    gdrive_raw = os.getenv(gdrive_env)
-    if not gdrive_raw:
-        raise RuntimeError(
-            f"Variável {gdrive_env} não definida no .env para o personagem '{personagem}'."
-        )
-
-    prefix = os.getenv(prefix_env, personagem)
-
-    gdrive_dir = Path(gdrive_raw)
-    print(f"[VIDEO_MANAGER] Personagem={personagem} | {gdrive_env}={gdrive_raw} | {prefix_env}={prefix}")
-    return gdrive_dir, prefix
+def _prefixo_personagem(personagem: str) -> str:
+    """
+    Prefixo padrão do arquivo final, derivado do personagem.
+    Você pode customizar aqui se quiser nomes diferentes do ID.
+    """
+    return _ident_personagem(personagem)
 
 
 # ── Helpers internos ─────────────────────────────────────────────────--------
@@ -148,10 +127,10 @@ def _remover_arquivos(arquivos: list[Path]):
             print(f"  ⚠ Não consegui remover {arq.name}: {e}")
 
 
-def _mover_para_gdrive(arquivo: Path, destino_dir: Path) -> Path | None:
-    """Move o vídeo final para a pasta do Google Drive."""
+def _mover_para_destino(arquivo: Path, destino_dir: Path) -> Path | None:
+    """Move o vídeo final para a pasta destino (Google Drive base + personagem)."""
     try:
-        print(f"  ℹ Destino Google Drive: {destino_dir}")
+        print(f"  ℹ Destino final: {destino_dir}")
         destino_dir.mkdir(parents=True, exist_ok=True)
         destino = destino_dir / arquivo.name
 
@@ -160,7 +139,7 @@ def _mover_para_gdrive(arquivo: Path, destino_dir: Path) -> Path | None:
         return destino
 
     except Exception as e:
-        print(f"  ❌ Erro ao mover para o Google Drive: {e}")
+        print(f"  ❌ Erro ao mover vídeo final: {e}")
         return None
 
 
@@ -183,24 +162,19 @@ def processar_videos(
         arquivos: lista de paths dos .mp4 gerados
         tema: tema final usado no roteiro (vai para o nome do arquivo)
         signo: signo (ou None, para personagens que não usam signo)
-        gdrive_dir_override: se informado, sobrescreve a pasta padrão do .env
-        prefixo_override: se informado, sobrescreve o VIDEO_PREFIX padrão
+        gdrive_dir_override: se informado, sobrescreve a pasta padrão derivada do personagem
+        prefixo_override: se informado, sobrescreve o prefixo padrão
 
     Returns:
-        Path final do arquivo no Google Drive (ou None em caso de erro)
+        Path final do arquivo na pasta do personagem (ou None em caso de erro)
     """
     print("\n[VIDEO MANAGER] Iniciando processamento dos vídeos...")
 
     arquivos = [Path(a) for a in arquivos]
 
-    try:
-        gdrive_dir_default, prefixo_default = _obter_config_video(personagem)
-    except RuntimeError as e:
-        print(f"  ⚠ Configuração de vídeo não encontrada: {e}")
-        return None
-
-    destino_drive = gdrive_dir_override or gdrive_dir_default
-    prefixo = prefixo_override or prefixo_default
+    # Pasta destino: base (G:\\Meu Drive\\Videos) + personagem (ID), ou override
+    destino_base = gdrive_dir_override or get_personagem_output_dir(personagem)
+    prefixo = prefixo_override or _prefixo_personagem(personagem)
 
     faltando = [a for a in arquivos if not a.exists()]
     if faltando:
@@ -208,10 +182,12 @@ def processar_videos(
         return None
 
     print(f"  ℹ Personagem: {personagem}")
+    print(f"  ℹ Pasta base do personagem: {destino_base}")
     print(f"  ℹ {len(arquivos)} arquivo(s) para processar:")
     for i, a in enumerate(arquivos, 1):
         print(f"     {i}. {a.name}")
 
+    # Decide onde gerar o vídeo concatenado (antes de mover)
     if len(arquivos) == 1:
         print("  ℹ Apenas 1 arquivo — pulando concatenação.")
         video_final = arquivos[0].parent / _gerar_nome_final(prefixo, signo, tema)
@@ -224,7 +200,7 @@ def processar_videos(
             return None
         _remover_arquivos(arquivos)
 
-    caminho_final = _mover_para_gdrive(video_final, destino_drive)
+    caminho_final = _mover_para_destino(video_final, destino_base)
 
     if caminho_final:
         print(f"\n  ✅ Processamento concluído!")

@@ -1,1 +1,0 @@
-# Submódulo de personagens

@@ -1,32 +1,25 @@
 # conteudo/menu.py
-# Menu interativo de configuração da sessão de geração.
+from conteudo import personas
 
-from .temas import (
-    temas_disponiveis,
-    personagens_disponiveis,
-    usa_signos,
-)
-
-
-PERSONAGENS_DISPONIVEIS = personagens_disponiveis()
-
-NOMES_EXIBICAO = {
-    "AnaCartomante": "Ana Cartomante",
-    "CoachEspiritual": "Coach Espiritual",
-}
+SIGNOS_LISTA = [
+    "Áries", "Touro", "Gêmeos", "Câncer", "Leão", "Virgem",
+    "Libra", "Escorpião", "Sagitário", "Capricórnio", "Aquário", "Peixes",
+    "aleatorio",
+]
+SIGNOS_LABEL = {"aleatorio": "Aleatório (sorteia um signo a cada vídeo)"}
 
 
-def linha(char: str = "=", largura: int = 52):
+def linha(char="=", largura=52):
     print(char * largura)
 
 
-def cabecalho(titulo: str):
+def cabecalho(titulo):
     linha()
     print(f"  {titulo}")
     linha()
 
 
-def perguntar_int(mensagem: str, minimo: int, maximo: int, padrao: int) -> int:
+def perguntar_int(mensagem, minimo, maximo, padrao):
     while True:
         try:
             entrada = input(f"{mensagem} [{padrao}]: ").strip()
@@ -37,10 +30,10 @@ def perguntar_int(mensagem: str, minimo: int, maximo: int, padrao: int) -> int:
                 return valor
             print(f"  Digite um número entre {minimo} e {maximo}.")
         except ValueError:
-            print("  Entrada inválida. Digite um número.")
+            print("  Entrada inválida.")
 
 
-def perguntar_sim_nao(mensagem: str, padrao: bool = True) -> bool:
+def perguntar_sim_nao(mensagem, padrao=True):
     opcoes = "S/n" if padrao else "s/N"
     while True:
         entrada = input(f"{mensagem} [{opcoes}]: ").strip().lower()
@@ -50,114 +43,117 @@ def perguntar_sim_nao(mensagem: str, padrao: bool = True) -> bool:
             return True
         if entrada in ("n", "nao", "não", "no"):
             return False
-        print("  Digite S para sim ou N para não.")
+        print("  Digite S ou N.")
 
 
 def selecionar_personagens() -> list[str]:
+    ids = personas.listar()
+    nms = personas.nomes()
     cabecalho("PERSONAGENS")
     print("  Personagens disponíveis:")
-    for i, p in enumerate(PERSONAGENS_DISPONIVEIS, 1):
-        nome = NOMES_EXIBICAO.get(p, p)
-        print(f"  {i}. {nome}")
+    for i, pid in enumerate(ids, 1):
+        print(f"  {i}. {nms[pid]}")
     print("  Digite os números separados por vírgula (ex: 1,2)")
     print("  Pressione Enter para selecionar todos.")
     while True:
         entrada = input("  Personagens: ").strip()
         if not entrada:
             print("  Todos os personagens selecionados.")
-            return PERSONAGENS_DISPONIVEIS.copy()
+            return ids.copy()
         try:
             indices = [int(x.strip()) for x in entrada.split(",")]
-            selecionados: list[str] = []
+            selecionados = []
+            ok = True
             for idx in indices:
-                if 1 <= idx <= len(PERSONAGENS_DISPONIVEIS):
-                    selecionados.append(PERSONAGENS_DISPONIVEIS[idx - 1])
+                if 1 <= idx <= len(ids):
+                    selecionados.append(ids[idx - 1])
                 else:
-                    print(f"  Número {idx} inválido. Tente novamente.")
-                    selecionados = []
+                    print(f"  Número {idx} inválido.")
+                    ok = False
                     break
-            if selecionados:
-                nomes = [NOMES_EXIBICAO.get(p, p) for p in selecionados]
-                print(f"  Selecionados: {', '.join(nomes)}")
+            if ok and selecionados:
+                print(f"  Selecionados: {', '.join(nms[p] for p in selecionados)}")
                 return selecionados
         except ValueError:
-            print("  Formato inválido. Use números separados por vírgula.")
+            print("  Formato inválido.")
 
 
-def selecionar_tema(personagem: str) -> str:
-    nome_exib = NOMES_EXIBICAO.get(personagem, personagem)
-    cabecalho(f"TEMA — {nome_exib}")
-    temas = temas_disponiveis(personagem)
+def selecionar_tema(pid: str) -> str:
+    persona = personas.obter(pid)
+    cabecalho(f"TEMA — {persona.NOME}")
+    temas = list(persona.TEMAS.keys())
+    tema_padrao = getattr(persona, "TEMA_PADRAO", "aleatorio")
     print("  Temas disponíveis:")
-    for i, tema in enumerate(temas, 1):
-        sufixo = " (sorteia a cada vídeo)" if tema == "aleatorio" else ""
-        print(f"  {i}. {tema.capitalize()}{sufixo}")
+    for i, t in enumerate(temas, 1):
+        sufixo = " (sorteia a cada vídeo)" if t == "aleatorio" else ""
+        marcador = " [padrão]" if t == tema_padrao else ""
+        print(f"  {i}. {t.capitalize()}{sufixo}{marcador}")
+    padrao_idx = temas.index(tema_padrao) + 1 if tema_padrao in temas else 1
     while True:
         try:
-            entrada = input(f"  Tema [1-{len(temas)}]: ").strip()
-            idx = int(entrada) - 1
+            entrada = input(f"  Tema [1-{len(temas)}] [{padrao_idx}]: ").strip()
+            if not entrada:
+                idx = padrao_idx - 1
+            else:
+                idx = int(entrada) - 1
             if 0 <= idx < len(temas):
                 tema = temas[idx]
                 print(f"  Tema selecionado: {tema.capitalize()}")
                 return tema
-            print(f"  Digite um número entre 1 e {len(temas)}.")
+            print(f"  Digite entre 1 e {len(temas)}.")
         except ValueError:
             print("  Entrada inválida.")
 
 
-def selecionar_signo(personagem: str) -> str:
-    SIGNOS = [
-        "Áries", "Touro", "Gêmeos", "Câncer", "Leão", "Virgem",
-        "Libra", "Escorpião", "Sagitário", "Capricórnio", "Aquário", "Peixes",
-        "aleatorio",
-    ]
-    NOMES_EXIBICAO_SIGNO = {
-        "aleatorio": "Aleatório (sorteia um signo a cada vídeo)",
-    }
-    nome_exib = NOMES_EXIBICAO.get(personagem, personagem)
-    cabecalho(f"SIGNO — {nome_exib}")
+def selecionar_signo(pid: str) -> str | None:
+    persona = personas.obter(pid)
+    if not getattr(persona, "USA_SIGNOS", False):
+        return None
+    cabecalho(f"SIGNO — {persona.NOME}")
+    signo_padrao = getattr(persona, "SIGNO_PADRAO", "aleatorio")
     print("  Signos disponíveis:")
-    for i, s in enumerate(SIGNOS, 1):
-        label = NOMES_EXIBICAO_SIGNO.get(s, s)
-        print(f"  {i:2}. {label}")
+    for i, s in enumerate(SIGNOS_LISTA, 1):
+        label = SIGNOS_LABEL.get(s, s)
+        marcador = " [padrão]" if s == signo_padrao else ""
+        print(f"  {i:2}. {label}{marcador}")
+    padrao_idx = SIGNOS_LISTA.index(signo_padrao) + 1 if signo_padrao in SIGNOS_LISTA else len(SIGNOS_LISTA)
     while True:
         try:
-            entrada = input(f"  Signo [1-{len(SIGNOS)}]: ").strip()
-            idx = int(entrada) - 1
-            if 0 <= idx < len(SIGNOS):
-                signo = SIGNOS[idx]
-                label = NOMES_EXIBICAO_SIGNO.get(signo, signo)
+            entrada = input(f"  Signo [1-{len(SIGNOS_LISTA)}] [{padrao_idx}]: ").strip()
+            if not entrada:
+                idx = padrao_idx - 1
+            else:
+                idx = int(entrada) - 1
+            if 0 <= idx < len(SIGNOS_LISTA):
+                signo = SIGNOS_LISTA[idx]
+                label = SIGNOS_LABEL.get(signo, signo)
                 print(f"  Signo selecionado: {label}")
                 return signo
-            print(f"  Digite um número entre 1 e {len(SIGNOS)}.")
+            print(f"  Digite entre 1 e {len(SIGNOS_LISTA)}.")
         except ValueError:
             print("  Entrada inválida.")
 
 
 def selecionar_motor() -> str:
-    """Pergunta qual motor de geração usar: Guru ou Humble."""
     cabecalho("MOTOR DE GERAÇÃO")
-    print("  1. Guru  (Ferramentas Guru + OCR — padrão)")
-    print("  2. Humble (Flow Web direto via Selenium)")
+    print("  1. Humble (Flow Web direto via Selenium — padrão)")
+    print("  2. Guru   (Ferramentas Guru + OCR)")
     while True:
         entrada = input("  Motor [1/2] [1]: ").strip()
         if not entrada or entrada == "1":
-            print("  Motor selecionado: Guru")
-            return "guru"
-        if entrada == "2":
             print("  Motor selecionado: Humble")
             return "humble"
+        if entrada == "2":
+            print("  Motor selecionado: Guru")
+            return "guru"
         print("  Digite 1 ou 2.")
 
 
 def exibir_menu() -> dict:
     cabecalho("AUTOMAÇÃO DE VÍDEOS — CONFIGURAÇÃO DA SESSÃO")
-
-    # 1. Motor de geração
     linha("-", 52)
     motor = selecionar_motor()
 
-    # 2. Modo de execução
     linha("-", 52)
     print("  MODO DE EXECUÇÃO")
     print("  1. Contínuo — gera em loop até ser encerrado (padrão)")
@@ -174,7 +170,6 @@ def exibir_menu() -> dict:
             break
         print("  Digite 1 ou 2.")
 
-    # 3. Quantidade de vídeos
     linha("-", 52)
     print("  QUANTIDADE DE VÍDEOS")
     videos_por_personagem = perguntar_int(
@@ -183,32 +178,27 @@ def exibir_menu() -> dict:
     )
     print(f"  {videos_por_personagem} vídeos por personagem.")
 
-    # 4. Personagens
     linha("-", 52)
     personagens_ids = selecionar_personagens()
-
     personagens_config = []
+
     for pid in personagens_ids:
+        persona = personas.obter(pid)
         tema = selecionar_tema(pid)
-
-        if usa_signos(pid):
-            signo = selecionar_signo(pid)
-        else:
-            signo = None
-
+        signo = selecionar_signo(pid)
+        cenas_padrao = getattr(persona, "CENAS_PADRAO", 3)
         cenas_por_video = perguntar_int(
-            f"  Quantas cenas por vídeo para {NOMES_EXIBICAO.get(pid, pid)}",
-            minimo=1, maximo=10, padrao=5,
+            f"  Quantas cenas por vídeo para {persona.NOME}",
+            minimo=2, maximo=50, padrao=cenas_padrao,
         )
         personagens_config.append({
-            "id":              pid,
-            "nome":            NOMES_EXIBICAO.get(pid, pid),
-            "signo":           signo,
-            "tema":            tema,
+            "id": pid,
+            "nome": persona.NOME,
+            "signo": signo,
+            "tema": tema,
             "cenas_por_video": cenas_por_video,
         })
 
-    # Resumo
     cabecalho("RESUMO DA SESSÃO")
     print(f"  Motor:        {'Guru' if motor == 'guru' else 'Humble'}")
     print(f"  Modo:         {modo.capitalize()}")
@@ -217,17 +207,15 @@ def exibir_menu() -> dict:
     for p in personagens_config:
         signo_str = p["signo"] if p["signo"] else "—"
         print(f"    {p['nome']} | {signo_str} | {p['tema'].capitalize()} | {p['cenas_por_video']} cenas/vídeo")
-    total = len(personagens_config) * videos_por_personagem
-    print(f"  Total por ciclo: {total} vídeos")
-    print()
+    print(f"  Total por ciclo: {len(personagens_config) * videos_por_personagem} vídeos\n")
 
     if not perguntar_sim_nao("  Confirmar e iniciar?", padrao=True):
-        print("  Configuração cancelada. Reiniciando menu...")
+        print("  Configuração cancelada. Reiniciando...")
         return exibir_menu()
 
     return {
-        "modo":                  modo,
-        "motor":                 motor,
+        "modo": modo,
+        "motor": motor,
         "videos_por_personagem": videos_por_personagem,
-        "personagens":           personagens_config,
+        "personagens": personagens_config,
     }

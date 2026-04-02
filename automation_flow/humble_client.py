@@ -7,6 +7,8 @@ from pathlib import Path
 from datetime import datetime
 import uuid
 import pyperclip
+import sys
+import re
 
 import pyautogui
 import pygetwindow as gw
@@ -35,6 +37,11 @@ class HumbleFlowError(RuntimeError):
     pass
 
 
+class HumbleAccountDisabledError(RuntimeError):
+    """Conta Google/Humble desativada ou bloqueada durante o login."""
+    pass
+
+
 def _ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
@@ -44,8 +51,46 @@ def _log(msg: str):
 
 
 # ============================================================================
+#   DETECÇÃO DE CONTA DESATIVADA
+# ============================================================================
+
+
+def detectar_conta_google_desativada(driver, timeout=5) -> str | None:
+    """
+    Retorna o e-mail detectado se a tela 'Sua conta foi desativada' estiver visível.
+    Caso contrário, retorna None.
+    """
+    try:
+        WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.ID, "headingText"))
+        )
+    except Exception:
+        return None
+
+    try:
+        heading = driver.find_element(By.ID, "headingText").text.strip().lower()
+    except Exception:
+        heading = ""
+
+    if "sua conta foi desativada" not in heading and "desativada" not in heading:
+        return None
+
+    email = None
+    try:
+        email = driver.find_element(
+            By.CSS_SELECTOR,
+            ".yAlK0b[data-email]"
+        ).get_attribute("data-email")
+    except Exception:
+        pass
+
+    return email or "email_desconhecido"
+
+
+# ============================================================================
 #   DRIVER
 # ============================================================================
+
 
 def criar_driver_humble(download_dir: Path | None = None):
     download_dir = Path(download_dir or DOWNLOAD_DIR)
@@ -105,6 +150,7 @@ def _wait_visible(driver, by, value, timeout=WAIT, descricao="elemento"):
 #   LOGIN + PREPARO
 # ============================================================================
 
+
 def abrir_flow(driver):
     _log(f"[HUMBLE] Abrindo Flow: {HUMBLE_FLOW_URL}")
     driver.get(HUMBLE_FLOW_URL)
@@ -113,7 +159,7 @@ def abrir_flow(driver):
 
 def clicar_create_with_flow(driver):
     _log("[HUMBLE] Clicando em 'Create with Flow'...")
-    xpath = "//button[.//span[contains(., 'Create with Flow')]]"
+    xpath = "//button[.//span[contains(., 'Create with Flow')] ]"
     _wait_click(driver, By.XPATH, xpath, descricao="Create with Flow")
     time.sleep(2)
 
@@ -165,7 +211,15 @@ def fazer_login_google(driver, email: str, senha: str):
         descricao="Avançar/Next senha",
     )
 
-    time.sleep(6)
+    time.sleep(3)
+
+    email_bloqueado = detectar_conta_google_desativada(driver, timeout=5)
+    if email_bloqueado:
+        raise HumbleAccountDisabledError(
+            f"Conta Google desativada/bloqueada: {email_bloqueado}"
+        )
+
+    time.sleep(3)
 
 
 def aguardar_flow_pronto(driver):
@@ -173,7 +227,6 @@ def aguardar_flow_pronto(driver):
     fim = time.time() + 40
     while time.time() < fim:
         try:
-            # qualquer coisa do header principal serve pra saber que carregou
             driver.find_element(By.XPATH, "//header | //button[contains(., 'Novo projeto')]")
             _log("✔ Flow pronto.")
             return
@@ -205,6 +258,7 @@ def _fechar_popup_login_chrome():
         _log("⚠ Fail-safe do PyAutoGUI disparou ao tentar fechar popup. Ignorando.")
     except Exception as e:
         _log(f"⚠ Erro ao tentar fechar popup (ignorado): {e}")
+
 
 def clicar_novo_projeto(driver):
     """
@@ -253,14 +307,22 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
 
     _fechar_popup_login_chrome()
 
+    email_bloqueado = detectar_conta_google_desativada(driver, timeout=3)
+    if email_bloqueado:
+        raise HumbleAccountDisabledError(
+            f"Conta Google desativada/bloqueada após popup: {email_bloqueado}"
+        )
+
     aguardar_flow_pronto(driver)
     clicar_novo_projeto(driver)
     abrir_chip_nano(driver)
     configurar_nano_video_9x16_x1_fast(driver)
 
+
 # ============================================================================
-#   NANO / PROMPT / RESTO (igual antes)
+#   NANO / PROMPT / RESTO
 # ============================================================================
+
 
 def abrir_chip_nano(driver):
     _log("[HUMBLE] Abrindo chip Nano Banana 2...")
@@ -414,11 +476,25 @@ def clicar_criar(driver):
     time.sleep(2)
     _debug_dump_cards(driver)
 
+
 # ============================================================================
-#   MONITOR DE GERAÇÃO
+#   MONITOR DE GERAÇÃO (COM % EM UMA LINHA)
 # ============================================================================
 
 ERRO_KEYWORDS = ["Falha", "Erro", "Violação"]
+
+
+def _print_progress_inline(msg: str):
+    sys.stdout.write("\r" + msg.ljust(120))
+    sys.stdout.flush()
+
+
+def _finish_progress_inline(msg: str = ""):
+    if msg:
+        sys.stdout.write("\r" + msg.ljust(120) + "\n")
+    else:
+        sys.stdout.write("\n")
+    sys.stdout.flush()
 
 
 def _safe_len(iterable):
@@ -580,6 +656,51 @@ def _card_tem_erro(card) -> bool:
     return any(t.lower() in txt for t in termos)
 
 
+def _extrair_percentual_card(card) -> int | None:
+    """
+    Tenta achar a porcentagem visível no card, ex.: 1%, 34%, 100%.
+    Retorna int ou None.
+    """
+    candidatos_xpath = [
+        ".//*[contains(text(), '%')]",
+        ".//span[contains(text(), '%')]",
+        ".//div[contains(text(), '%')]",
+        ".//p[contains(text(), '%')]",
+    ]
+
+    textos = []
+
+    for xp in candidatos_xpath:
+        try:
+            els = card.find_elements(By.XPATH, xp)
+            for el in els:
+                try:
+                    txt = (el.text or "").strip()
+                    if txt:
+                        textos.append(txt)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    try:
+        txt_card = (card.text or "").strip()
+        if txt_card:
+            textos.append(txt_card)
+    except Exception:
+        pass
+
+    for txt in textos:
+        m = re.search(r'(?<!\d)(100|[1-9]?\d)\s*%', txt)
+        if m:
+            try:
+                return int(m.group(1))
+            except Exception:
+                pass
+
+    return None
+
+
 def _snapshot_card(card):
     try:
         txt = _texto_card(card)
@@ -591,26 +712,30 @@ def _snapshot_card(card):
     except Exception:
         html = ""
 
+    percentual = _extrair_percentual_card(card)
+
     return {
         "texto": txt[:500],
         "tam_html": len(html),
         "tem_video": _card_tem_video_ou_preview(card),
         "tem_processando": _card_tem_sinal_processando(card),
         "tem_erro": _card_tem_erro(card),
+        "percentual": percentual,
     }
 
 
 def aguardar_geracao_video(driver, prompt: str, timeout=420):
-    _log("[HUMBLE] Aguardando geração do vídeo (modo inteligente)...")
+    _log("[HUMBLE] Aguardando geração do vídeo...")
 
     fim = time.time() + timeout
     card = None
     tile_id = None
 
-    ultimo_snapshot = None
     ultimo_movimento = time.time()
     viu_sinal_de_vida = False
-    viu_processando = False
+    ultimo_percentual_logado = None
+    ultimo_status_inline = None
+    linha_progresso_ativa = False
 
     while time.time() < fim:
         if tile_id:
@@ -623,74 +748,94 @@ def aguardar_geracao_video(driver, prompt: str, timeout=420):
             card = _encontrar_card_por_prompt(driver, prompt)
 
         if not card:
-            _log("ℹ Ainda sem card visível. Aguardando...")
+            if ultimo_status_inline != "sem_card":
+                _print_progress_inline("[HUMBLE] Gerando vídeo... aguardando card aparecer")
+                ultimo_status_inline = "sem_card"
+                linha_progresso_ativa = True
             time.sleep(2)
             continue
 
         if not tile_id:
             tile_id = _obter_tile_id(card)
             if tile_id:
+                if linha_progresso_ativa:
+                    _finish_progress_inline()
+                    linha_progresso_ativa = False
                 _log(f"[HUMBLE] Tile ID detectado: {tile_id}")
 
         snap = _snapshot_card(card)
 
         if snap["tem_erro"]:
+            if linha_progresso_ativa:
+                _finish_progress_inline("[HUMBLE] Geração falhou.")
             _log("❌ Card em estado de erro detectado por texto real.")
             return {"status": "erro", "tile_id": tile_id}
 
         if snap["tem_video"]:
+            if linha_progresso_ativa:
+                pct_final = snap.get("percentual")
+                msg_final = (
+                    f"[HUMBLE] Gerando vídeo... {pct_final}% | pronto!"
+                    if pct_final is not None else
+                    "[HUMBLE] Gerando vídeo... pronto!"
+                )
+                _finish_progress_inline(msg_final)
             _log("✔ Card com preview/vídeo/download detectado. Vídeo pronto.")
             return {"status": "ok", "tile_id": tile_id}
 
-        if snap["tem_processando"]:
-            if not viu_processando:
-                _log("ℹ Sinal de processamento detectado.")
-            viu_processando = True
+        percentual = snap.get("percentual")
+
+        if percentual is not None:
             viu_sinal_de_vida = True
             ultimo_movimento = time.time()
 
-        if ultimo_snapshot is None:
-            ultimo_snapshot = snap
-            _log(f"ℹ Snapshot inicial do card: {snap}")
-            time.sleep(2)
-            continue
+            if percentual != ultimo_percentual_logado:
+                _print_progress_inline(f"[HUMBLE] Gerando vídeo... {percentual}%")
+                ultimo_percentual_logado = percentual
+                ultimo_status_inline = "percentual"
+                linha_progresso_ativa = True
 
-        mudou = (
-            snap["texto"] != ultimo_snapshot["texto"]
-            or snap["tam_html"] != ultimo_snapshot["tam_html"]
-            or snap["tem_processando"] != ultimo_snapshot["tem_processando"]
-            or snap["tem_video"] != ultimo_snapshot["tem_video"]
-        )
-
-        if mudou:
+        elif snap["tem_processando"]:
             viu_sinal_de_vida = True
             ultimo_movimento = time.time()
-            _log(
-                f"ℹ Card mudou: html {ultimo_snapshot['tam_html']} -> {snap['tam_html']} | "
-                f"processando={snap['tem_processando']} | video={snap['tem_video']}"
-            )
-            ultimo_snapshot = snap
+
+            if ultimo_status_inline != "processando":
+                _print_progress_inline("[HUMBLE] Gerando vídeo... processando")
+                ultimo_status_inline = "processando"
+                linha_progresso_ativa = True
+
         else:
             parado = int(time.time() - ultimo_movimento)
-            _log(f"ℹ Card sem mudanças há {parado}s.")
+            msg = f"[HUMBLE] Gerando vídeo... aguardando progresso ({parado}s)"
+            if ultimo_status_inline != msg:
+                _print_progress_inline(msg)
+                ultimo_status_inline = msg
+                linha_progresso_ativa = True
 
         if not viu_sinal_de_vida:
             if time.time() - ultimo_movimento > 45:
+                if linha_progresso_ativa:
+                    _finish_progress_inline("[HUMBLE] Geração falhou por falta de atividade.")
                 _log("❌ Card sem qualquer sinal de vida por 45s. Assumindo erro silencioso.")
                 return {"status": "erro", "tile_id": tile_id}
         else:
             if time.time() - ultimo_movimento > 90:
+                if linha_progresso_ativa:
+                    _finish_progress_inline("[HUMBLE] Geração falhou por estagnação.")
                 _log("❌ Card ficou estagnado por 90s após sinais de vida. Assumindo erro.")
                 return {"status": "erro", "tile_id": tile_id}
 
         time.sleep(3)
 
+    if linha_progresso_ativa:
+        _finish_progress_inline("[HUMBLE] Timeout na geração do vídeo.")
     raise HumbleFlowError("Timeout aguardando geração do vídeo.")
 
 
 # ============================================================================
 #   DOWNLOAD / CONCLUSÃO
 # ============================================================================
+
 
 def abrir_video_pronto(driver, tile_id: str | None = None, prompt: str | None = None):
     _log("[HUMBLE] Abrindo página do vídeo pronto...")

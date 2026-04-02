@@ -2,16 +2,20 @@ import os
 import pathlib
 from dotenv import load_dotenv
 
+
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
+
 EMAIL = os.getenv("FG_EMAIL")
 SENHA = os.getenv("FG_SENHA")
+
 
 EXE_PATH = os.getenv(
     "FG_EXE_PATH",
     r"C:\Users\vinic\AppData\Local\ferramentas_guru_v9\ferramentas-guru-v9.exe",
 )
+
 
 DEBUG_PORT_FG = int(os.getenv("FG_DEBUG_PORT", "9222"))
 WAIT = int(os.getenv("FG_WAIT", "20"))
@@ -22,9 +26,24 @@ TESSERACT_PATH = os.getenv(
     r"C:\Program Files\Tesseract-OCR\tesseract.exe",
 )
 
+
 # Pasta para salvar prints de debug OCR
 OCR_DEBUG_DIR = PROJECT_ROOT / "ocr_debug"
 OCR_DEBUG_DIR.mkdir(exist_ok=True)
+
+
+# Pasta base para vídeos finais dos personagens
+VIDEOS_BASE_DIR = pathlib.Path(
+    os.getenv("VIDEOS_BASE_DIR", r"G:\Meu Drive\Videos")
+)
+VIDEOS_BASE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def get_personagem_output_dir(personagem_id: str) -> pathlib.Path:
+    pasta = VIDEOS_BASE_DIR / personagem_id
+    pasta.mkdir(parents=True, exist_ok=True)
+    return pasta
+
 
 def carregar_contas_humble() -> list[dict]:
     contas = []

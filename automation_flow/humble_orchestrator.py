@@ -10,8 +10,8 @@ from .humble_client import (
     fluxo_completo_login_e_preparo,
     gerar_video_humble,
     HumbleFlowError,
+    HumbleAccountDisabledError,
 )
-
 
 MAX_TENTATIVAS_MESMO_FLOW = 3
 ESPERA_ENTRE_TENTATIVAS_S = 5
@@ -25,13 +25,34 @@ def _log(msg: str):
     print(f"[{ts()}] {msg}")
 
 
+# ============================================================================
+#   CONTROLE DE CONTAS DESATIVADAS
+# ============================================================================
+
+_contas_desativadas: set[str] = set()
+
+
+def _marcar_conta_desativada(email: str):
+    _contas_desativadas.add(email)
+    _log(f"🚫 Conta marcada como desativada e ignorada: {email}")
+
+
+def _conta_esta_desativada(conta: dict) -> bool:
+    return conta["email"] in _contas_desativadas
+
+
+# ============================================================================
+#   ABERTURA DE CONTA
+# ============================================================================
+
+
 def _abrir_conta(conta: dict):
     """
     Abre uma conta do Humble já logada e preparada no Flow.
     Retorna o driver pronto para gerar.
 
-    Se a preparação falhar, a exceção sobe e a conta é descartada
-    para esta cena.
+    Lança HumbleAccountDisabledError se a conta estiver desativada/bloqueada.
+    Lança qualquer outra exceção se a preparação falhar por outro motivo.
     """
     idx = conta["indice"]
     email = conta["email"]
@@ -54,6 +75,11 @@ def _fechar_driver(driver):
             pass
 
 
+# ============================================================================
+#   GERAÇÃO COM RETRY NA MESMA SESSÃO
+# ============================================================================
+
+
 def _tentar_gerar_na_mesma_sessao(
     driver,
     conta: dict,
@@ -72,7 +98,10 @@ def _tentar_gerar_na_mesma_sessao(
                 f"{tentativa}/{MAX_TENTATIVAS_MESMO_FLOW} da cena {idx_prompt} "
                 f"no mesmo Flow..."
             )
-            arquivo = gerar_video_humble(driver, prompt)
+            arquivo = gerar_video_humble(
+                driver,
+                prompt,
+            )
 
             if arquivo:
                 _log(
@@ -85,6 +114,10 @@ def _tentar_gerar_na_mesma_sessao(
                 f"⚠ Conta #{conta['indice']} não retornou arquivo na tentativa "
                 f"{tentativa}/{MAX_TENTATIVAS_MESMO_FLOW}."
             )
+
+        except HumbleAccountDisabledError:
+            # Conta desativada dentro da geração — não retentar
+            raise
 
         except Exception as e:
             _log(
@@ -108,6 +141,11 @@ def _tentar_gerar_na_mesma_sessao(
     return None
 
 
+# ============================================================================
+#   MAIN
+# ============================================================================
+
+
 def main(prompts: list[str]) -> list[Path]:
     """
     Ponto de entrada do Humble.
@@ -118,6 +156,8 @@ def main(prompts: list[str]) -> list[Path]:
     - para cada cena:
         - tenta até 3 vezes no MESMO Flow da sessão atual;
         - se mesmo assim falhar, fecha essa sessão e rotaciona para a próxima conta;
+    - contas marcadas como desativadas (HumbleAccountDisabledError) são puladas
+      permanentemente durante toda a execução do lote;
     - só passa para a próxima cena depois que a atual der certo.
     """
     print("=" * 55)
@@ -147,14 +187,25 @@ def main(prompts: list[str]) -> list[Path]:
         contas_tentadas_nesta_cena = 0
 
         while not gerou:
-            # 1) tenta primeiro na conta/sessão já aberta
+
+            # ------------------------------------------------------------------
+            # 1) Tenta na conta/sessão já aberta
+            # ------------------------------------------------------------------
             if driver_atual is not None and conta_atual is not None:
-                arquivo = _tentar_gerar_na_mesma_sessao(
-                    driver=driver_atual,
-                    conta=conta_atual,
-                    prompt=prompt,
-                    idx_prompt=idx_prompt,
-                )
+                try:
+                    arquivo = _tentar_gerar_na_mesma_sessao(
+                        driver=driver_atual,
+                        conta=conta_atual,
+                        prompt=prompt,
+                        idx_prompt=idx_prompt,
+                    )
+                except HumbleAccountDisabledError as e:
+                    _log(f"🚫 Conta #{conta_atual['indice']} desativada durante geração: {e}")
+                    _marcar_conta_desativada(conta_atual["email"])
+                    _fechar_driver(driver_atual)
+                    driver_atual = None
+                    conta_atual = None
+                    arquivo = None
 
                 if arquivo:
                     arquivos_baixados.append(arquivo)
@@ -162,35 +213,63 @@ def main(prompts: list[str]) -> list[Path]:
                     gerou = True
                     break
 
-                _log(
-                    f"⚠ Conta #{conta_atual['indice']} falhou após "
-                    f"{MAX_TENTATIVAS_MESMO_FLOW} tentativas no mesmo Flow. "
-                    f"Fechando sessão e rotacionando conta..."
-                )
-                _fechar_driver(driver_atual)
-                driver_atual = None
-                conta_atual = None
-
-            # 2) se não há sessão válida, abre próxima conta
-            if contas_tentadas_nesta_cena >= total_contas:
-                _log(f"ℹ Todas as {total_contas} contas foram tentadas para a cena {idx_prompt}.")
-                if ultimo_erro:
-                    raise HumbleFlowError(
-                        f"Não foi possível gerar a cena {idx_prompt}/{len(prompts)} "
-                        f"em nenhuma conta. Último erro: {ultimo_erro}"
+                if driver_atual is not None:
+                    _log(
+                        f"⚠ Conta #{conta_atual['indice']} falhou após "
+                        f"{MAX_TENTATIVAS_MESMO_FLOW} tentativas no mesmo Flow. "
+                        f"Fechando sessão e rotacionando conta..."
                     )
-                raise HumbleFlowError(
+                    _fechar_driver(driver_atual)
+                    driver_atual = None
+                    conta_atual = None
+
+            # ------------------------------------------------------------------
+            # 2) Verifica se ainda há contas disponíveis para esta cena
+            # ------------------------------------------------------------------
+            contas_ativas = [
+                c for c in HUMBLE_ACCOUNTS if not _conta_esta_desativada(c)
+            ]
+
+            if contas_tentadas_nesta_cena >= len(contas_ativas):
+                msg = (
                     f"Não foi possível gerar a cena {idx_prompt}/{len(prompts)} "
-                    f"em nenhuma conta."
+                    f"em nenhuma conta disponível."
+                )
+                if ultimo_erro:
+                    msg += f" Último erro: {ultimo_erro}"
+                _log(f"ℹ Todas as contas ativas ({len(contas_ativas)}) foram tentadas para a cena {idx_prompt}.")
+                raise HumbleFlowError(msg)
+
+            # ------------------------------------------------------------------
+            # 3) Abre próxima conta disponível
+            # ------------------------------------------------------------------
+            # Avança o índice pulando contas desativadas
+            tentativas_rotacao = 0
+            while tentativas_rotacao < total_contas:
+                candidata = HUMBLE_ACCOUNTS[indice_conta_atual]
+                indice_conta_atual = (indice_conta_atual + 1) % total_contas
+                tentativas_rotacao += 1
+                if not _conta_esta_desativada(candidata):
+                    break
+            else:
+                raise HumbleFlowError(
+                    "Todas as contas estão desativadas. Impossível continuar."
                 )
 
-            conta = HUMBLE_ACCOUNTS[indice_conta_atual]
-            indice_conta_atual = (indice_conta_atual + 1) % total_contas
+            conta = candidata
             contas_tentadas_nesta_cena += 1
 
             try:
                 driver_atual = _abrir_conta(conta)
                 conta_atual = conta
+            except HumbleAccountDisabledError as e:
+                _log(f"🚫 Conta #{conta['indice']} desativada durante abertura: {e}")
+                _marcar_conta_desativada(conta["email"])
+                _fechar_driver(driver_atual)
+                driver_atual = None
+                conta_atual = None
+                ultimo_erro = e
+                continue
             except Exception as e:
                 ultimo_erro = e
                 _log(f"❌ Conta #{conta['indice']} não conseguiu preparar o Flow: {e}")
@@ -199,12 +278,23 @@ def main(prompts: list[str]) -> list[Path]:
                 conta_atual = None
                 continue
 
-            arquivo = _tentar_gerar_na_mesma_sessao(
-                driver=driver_atual,
-                conta=conta_atual,
-                prompt=prompt,
-                idx_prompt=idx_prompt,
-            )
+            # ------------------------------------------------------------------
+            # 4) Tenta gerar na conta recém-aberta
+            # ------------------------------------------------------------------
+            try:
+                arquivo = _tentar_gerar_na_mesma_sessao(
+                    driver=driver_atual,
+                    conta=conta_atual,
+                    prompt=prompt,
+                    idx_prompt=idx_prompt,
+                )
+            except HumbleAccountDisabledError as e:
+                _log(f"🚫 Conta #{conta_atual['indice']} desativada durante geração: {e}")
+                _marcar_conta_desativada(conta_atual["email"])
+                _fechar_driver(driver_atual)
+                driver_atual = None
+                conta_atual = None
+                arquivo = None
 
             if arquivo:
                 arquivos_baixados.append(arquivo)
@@ -213,12 +303,14 @@ def main(prompts: list[str]) -> list[Path]:
                 break
 
             _log(
-                f"⚠ Conta #{conta_atual['indice']} não conseguiu gerar a cena {idx_prompt} "
-                f"mesmo após {MAX_TENTATIVAS_MESMO_FLOW} tentativas. Próxima conta..."
+                f"⚠ Conta #{conta_atual['indice'] if conta_atual else '?'} não conseguiu "
+                f"gerar a cena {idx_prompt} mesmo após {MAX_TENTATIVAS_MESMO_FLOW} tentativas. "
+                f"Próxima conta..."
             )
-            _fechar_driver(driver_atual)
-            driver_atual = None
-            conta_atual = None
+            if driver_atual is not None:
+                _fechar_driver(driver_atual)
+                driver_atual = None
+                conta_atual = None
 
         _log(f"✔ Vídeo {idx_prompt}/{len(prompts)} gerado com sucesso.")
 
