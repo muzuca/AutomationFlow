@@ -27,6 +27,7 @@ from .config import (
     HUMBLE_FLOW_URL,
 )
 
+pyautogui.FAILSAFE = False  # desativa fail-safe só neste script
 DEBUG_NAO_FECHAR = False
 
 
@@ -191,15 +192,19 @@ def _fechar_popup_login_chrome():
     except Exception:
         pass
 
-    screen_w, screen_h = pyautogui.size()
-    cx = int(screen_w * 0.5)
-    cy = int(screen_h * 0.4)
-    pyautogui.moveTo(cx, cy, duration=0.1)
-    pyautogui.click()
-    time.sleep(0.2)
-    pyautogui.press("esc")
-    time.sleep(1)
-
+    try:
+        screen_w, screen_h = pyautogui.size()
+        cx = int(screen_w * 0.5)
+        cy = int(screen_h * 0.4)
+        pyautogui.moveTo(cx, cy, duration=0.1)
+        pyautogui.click()
+        time.sleep(0.2)
+        pyautogui.press("esc")
+        time.sleep(1)
+    except pyautogui.FailSafeException:
+        _log("⚠ Fail-safe do PyAutoGUI disparou ao tentar fechar popup. Ignorando.")
+    except Exception as e:
+        _log(f"⚠ Erro ao tentar fechar popup (ignorado): {e}")
 
 def clicar_novo_projeto(driver):
     """
