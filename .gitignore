@@ -27,3 +27,6 @@ chromedriver.exe
 # Windows
 Thumbs.db
 desktop.ini
+
+#Outros
+historico_roteiros.json
