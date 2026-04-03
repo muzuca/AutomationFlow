@@ -363,17 +363,32 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
         )
 
     aguardar_flow_pronto(driver)
-
-    # NOVO: limpa qualquer changelog / banner da tela inicial
     _fechar_overlays_flow(driver)
 
     clicar_novo_projeto(driver)
-
-    # NOVO: se o changelog abrir só depois do "Novo projeto", fecha aqui também
     _fechar_overlays_flow(driver)
 
     abrir_chip_nano(driver)
     configurar_nano_video_9x16_x1_fast(driver)
+
+    _log("[HUMBLE] Enviando F5 real no navegador antes de preencher o prompt...")
+    try:
+        body = driver.find_element(By.TAG_NAME, "body")
+        body.send_keys(Keys.F5)
+    except Exception:
+        driver.switch_to.active_element.send_keys(Keys.F5)
+
+    time.sleep(5)
+
+    _fechar_overlays_flow(driver)
+
+    _wait_visible(
+        driver,
+        By.XPATH,
+        "//div[@role='textbox' and @contenteditable='true']",
+        timeout=30,
+        descricao="campo prompt após F5",
+    )
 
 
 # ============================================================================
