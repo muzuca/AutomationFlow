@@ -398,6 +398,14 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
     abrir_chip_nano(driver)
     configurar_nano_video_9x16_x1_fast(driver)
 
+    try:
+        pyautogui.press("f5")
+        time.sleep(5)
+    except pyautogui.FailSafeException:
+        _log("⚠ Fail-safe do PyAutoGUI disparou ao enviar F5. Ignorando.")
+    except Exception as e:
+        _log(f"⚠ Erro ao enviar F5 via PyAutoGUI: {e}")
+
 # ============================================================================
 #   NANO / PROMPT / RESTO
 # ============================================================================
