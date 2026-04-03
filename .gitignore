@@ -14,6 +14,8 @@ __pycache__/
 *.pyd
 *.so
 .python-version
+
+# Ambientes virtuais
 .venv/
 venv/
 env/
@@ -24,6 +26,7 @@ ENV/
 # =============================================================================
 .vscode/
 .idea/
+*.code-workspace
 
 # =============================================================================
 # Logs
@@ -40,7 +43,7 @@ ENV/
 *.wav
 
 # =============================================================================
-# Pastas geradas em execução
+# Pastas geradas em execução (runtime)
 # =============================================================================
 downloads/
 historico/
@@ -50,7 +53,7 @@ ocr_debug/
 
 # =============================================================================
 # Artefatos locais / binários
-# Baixar ou provisionar separadamente na VPS/máquina local
+# (baixar/provisionar separadamente em cada máquina/VPS)
 # =============================================================================
 ffmpeg.exe
 ffprobe.exe
