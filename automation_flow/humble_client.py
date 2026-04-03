@@ -314,24 +314,24 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
         )
 
     aguardar_flow_pronto(driver)
+
+    # primeira abertura do projeto
     clicar_novo_projeto(driver)
     abrir_chip_nano(driver)
     configurar_nano_video_9x16_x1_fast(driver)
 
-    # ------------------------------------------------------------------
-    # WORKAROUND VPS:
-    # depois de criar o projeto e configurar o Nano, dá F5 antes do prompt
-    # ------------------------------------------------------------------
-    _log("[HUMBLE] Recarregando a página (F5) antes de preencher o prompt...")
-    driver.refresh()
-    time.sleep(4)
+    # ajuste simples: em vez de F5, volta pro fluxo de "Novo projeto" de novo
+    _log("[HUMBLE] Reabrindo 'Novo projeto' para estabilizar a sessão antes do prompt...")
+    clicar_novo_projeto(driver)
+    abrir_chip_nano(driver)
+    configurar_nano_video_9x16_x1_fast(driver)
 
     _wait_visible(
         driver,
         By.XPATH,
         "//div[@role='textbox' and @contenteditable='true']",
         timeout=30,
-        descricao="campo prompt após F5",
+        descricao="campo prompt após reabrir Novo projeto",
     )
 
 # ============================================================================
