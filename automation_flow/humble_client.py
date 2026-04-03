@@ -259,6 +259,55 @@ def _fechar_popup_login_chrome():
     except Exception as e:
         _log(f"⚠ Erro ao tentar fechar popup (ignorado): {e}")
 
+def _fechar_overlays_flow(driver):
+    """
+    Fecha overlays/modais genéricos do Flow:
+    - changelog / release notes (como o iframe da tela 'Experimental Voice Ingredients')
+    - banners com botões 'Comece já', 'Fechar', 'Close', 'Entendi', 'OK'
+    - tenta também ESC + clique no fundo.
+    """
+    _log("[HUMBLE] Verificando se há overlays/banners do Flow para fechar...")
+
+    # 1) ESC direto (muitos modais fecham com Esc)
+    try:
+        from selenium.webdriver.common.keys import Keys
+        body = driver.find_element(By.TAG_NAME, "body")
+        body.send_keys(Keys.ESCAPE)
+        time.sleep(0.8)
+    except Exception:
+        pass
+
+    # 2) Tenta clicar em botões comuns de fechamento
+    xpaths_botoes = [
+        "//button[span[normalize-space()='Comece já']]",
+        "//button[normalize-space()='Comece já']",
+        "//button[normalize-space()='Fechar']",
+        "//button[normalize-space()='OK']",
+        "//button[normalize-space()='Ok']",
+        "//button[normalize-space()='Entendi']",
+        "//button[contains(., 'Got it')]",
+        "//button[contains(., 'Close')]",
+        "//button[contains(., 'Dismiss')]",
+    ]
+    for xp in xpaths_botoes:
+        try:
+            btn = WebDriverWait(driver, 2).until(
+                EC.element_to_be_clickable((By.XPATH, xp))
+            )
+            _log(f"[HUMBLE] Fechando overlay via botão: {xp}")
+            btn.click()
+            time.sleep(1)
+            break
+        except Exception:
+            continue
+
+    # 3) Clique no fundo (às vezes o overlay fecha assim)
+    try:
+        body = driver.find_element(By.TAG_NAME, "body")
+        driver.execute_script("arguments[0].click();", body)
+        time.sleep(0.5)
+    except Exception:
+        pass
 
 def clicar_novo_projeto(driver):
     """
@@ -314,7 +363,15 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
         )
 
     aguardar_flow_pronto(driver)
+
+    # NOVO: limpa qualquer changelog / banner da tela inicial
+    _fechar_overlays_flow(driver)
+
     clicar_novo_projeto(driver)
+
+    # NOVO: se o changelog abrir só depois do "Novo projeto", fecha aqui também
+    _fechar_overlays_flow(driver)
+
     abrir_chip_nano(driver)
     configurar_nano_video_9x16_x1_fast(driver)
 
