@@ -273,7 +273,7 @@ def _fechar_overlays_flow(driver):
         from selenium.webdriver.common.keys import Keys
         body = driver.find_element(By.TAG_NAME, "body")
         body.send_keys(Keys.ESCAPE)
-        time.sleep(0.8)
+        time.sleep(0.1)
     except Exception:
         pass
 
@@ -291,7 +291,7 @@ def _fechar_overlays_flow(driver):
     ]
     for xp in xpaths_botoes:
         try:
-            btn = WebDriverWait(driver, 2).until(
+            btn = WebDriverWait(driver, 0.5).until(
                 EC.element_to_be_clickable((By.XPATH, xp))
             )
             _log(f"[HUMBLE] Fechando overlay via botão: {xp}")
@@ -305,7 +305,7 @@ def _fechar_overlays_flow(driver):
     try:
         body = driver.find_element(By.TAG_NAME, "body")
         driver.execute_script("arguments[0].click();", body)
-        time.sleep(0.5)
+        time.sleep(0.2)
     except Exception:
         pass
 
@@ -366,12 +366,8 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
     _fechar_overlays_flow(driver)
 
     clicar_novo_projeto(driver)
-    _fechar_overlays_flow(driver)
 
-    abrir_chip_nano(driver)
-    configurar_nano_video_9x16_x1_fast(driver)
-
-    _log("[HUMBLE] Enviando F5 real no navegador antes de preencher o prompt...")
+    _log("[HUMBLE] Enviando F5 real após 'Novo projeto' e antes de configurar o Nano...")
     try:
         body = driver.find_element(By.TAG_NAME, "body")
         body.send_keys(Keys.F5)
@@ -385,11 +381,13 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
     _wait_visible(
         driver,
         By.XPATH,
-        "//div[@role='textbox' and @contenteditable='true']",
+        "//button[contains(., 'Nano Banana 2') and @aria-haspopup='menu']",
         timeout=30,
-        descricao="campo prompt após F5",
+        descricao="chip Nano Banana 2 após F5",
     )
 
+    abrir_chip_nano(driver)
+    configurar_nano_video_9x16_x1_fast(driver)
 
 # ============================================================================
 #   NANO / PROMPT / RESTO
