@@ -291,12 +291,12 @@ def _fechar_overlays_flow(driver):
     ]
     for xp in xpaths_botoes:
         try:
-            btn = WebDriverWait(driver, 0.5).until(
+            btn = WebDriverWait(driver, 0.2).until(
                 EC.element_to_be_clickable((By.XPATH, xp))
             )
             _log(f"[HUMBLE] Fechando overlay via botão: {xp}")
             btn.click()
-            time.sleep(1)
+            time.sleep(0.2)
             break
         except Exception:
             continue
@@ -305,7 +305,7 @@ def _fechar_overlays_flow(driver):
     try:
         body = driver.find_element(By.TAG_NAME, "body")
         driver.execute_script("arguments[0].click();", body)
-        time.sleep(0.2)
+        time.sleep(0.1)
     except Exception:
         pass
 
@@ -367,14 +367,23 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
 
     clicar_novo_projeto(driver)
 
-    _log("[HUMBLE] Enviando F5 real após 'Novo projeto' e antes de configurar o Nano...")
-    try:
-        body = driver.find_element(By.TAG_NAME, "body")
-        body.send_keys(Keys.F5)
-    except Exception:
-        driver.switch_to.active_element.send_keys(Keys.F5)
+    _log("[HUMBLE] Enviando F5 via teclado do Windows após 'Novo projeto'...")
 
-    time.sleep(5)
+    try:
+        wins = [w for w in gw.getWindowsWithTitle("Flow -")]
+        if wins:
+            wins[0].activate()
+            time.sleep(0.5)
+    except Exception:
+        pass
+
+    try:
+        pyautogui.press("f5")
+        time.sleep(5)
+    except pyautogui.FailSafeException:
+        _log("⚠ Fail-safe do PyAutoGUI disparou ao enviar F5. Ignorando.")
+    except Exception as e:
+        _log(f"⚠ Erro ao enviar F5 via PyAutoGUI: {e}")
 
     _fechar_overlays_flow(driver)
 
