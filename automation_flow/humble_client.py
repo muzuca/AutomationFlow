@@ -147,6 +147,49 @@ def _wait_visible(driver, by, value, timeout=WAIT, descricao="elemento"):
 
 
 # ============================================================================
+#   FUNÇÃO CENTRAL DE REFRESH
+# ============================================================================
+
+
+def refresh_flow(driver, motivo: str = ""):
+    """
+    Dá um F5 real na janela do Flow via PyAutoGUI, fecha overlays
+    e espera poucos segundos para estabilizar.
+    Pode ser chamada várias vezes (após Novo projeto, antes de cada prompt).
+    """
+    msg = "[HUMBLE] Refresh do Flow"
+    if motivo:
+        msg += f" ({motivo})"
+    _log(msg + "...")
+
+    # Tenta focar a janela do Flow
+    try:
+        wins = [w for w in gw.getWindowsWithTitle("Flow -")]
+        if wins:
+            wins[0].activate()
+            time.sleep(0.3)
+    except Exception:
+        pass
+
+    # F5 real no navegador
+    try:
+        pyautogui.press("f5")
+    except pyautogui.FailSafeException:
+        _log("⚠ Fail-safe do PyAutoGUI disparou ao enviar F5. Ignorando.")
+    except Exception as e:
+        _log(f"⚠ Erro ao enviar F5 via PyAutoGUI: {e}")
+
+    # Espera curto para recarregar
+    time.sleep(3)
+
+    # Fecha eventuais overlays que aparecem logo após o refresh
+    try:
+        _fechar_overlays_flow(driver)
+    except Exception:
+        pass
+
+
+# ============================================================================
 #   LOGIN + PREPARO
 # ============================================================================
 
@@ -259,18 +302,18 @@ def _fechar_popup_login_chrome():
     except Exception as e:
         _log(f"⚠ Erro ao tentar fechar popup (ignorado): {e}")
 
+
 def _fechar_overlays_flow(driver):
     """
     Fecha overlays/modais genéricos do Flow:
-    - changelog / release notes (como o iframe da tela 'Experimental Voice Ingredients')
+    - changelog / release notes
     - banners com botões 'Comece já', 'Fechar', 'Close', 'Entendi', 'OK'
     - tenta também ESC + clique no fundo.
     """
     _log("[HUMBLE] Verificando se há overlays/banners do Flow para fechar...")
 
-    # 1) ESC direto (muitos modais fecham com Esc)
+    # 1) ESC direto
     try:
-        from selenium.webdriver.common.keys import Keys
         body = driver.find_element(By.TAG_NAME, "body")
         body.send_keys(Keys.ESCAPE)
         time.sleep(0.1)
@@ -301,13 +344,14 @@ def _fechar_overlays_flow(driver):
         except Exception:
             continue
 
-    # 3) Clique no fundo (às vezes o overlay fecha assim)
+    # 3) Clique no fundo
     try:
         body = driver.find_element(By.TAG_NAME, "body")
         driver.execute_script("arguments[0].click();", body)
         time.sleep(0.1)
     except Exception:
         pass
+
 
 def clicar_novo_projeto(driver):
     """
@@ -367,44 +411,20 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
 
     clicar_novo_projeto(driver)
 
-    _log("[HUMBLE] Enviando F5 via teclado do Windows após 'Novo projeto'...")
-
-    try:
-        wins = [w for w in gw.getWindowsWithTitle("Flow -")]
-        if wins:
-            wins[0].activate()
-            time.sleep(0.5)
-    except Exception:
-        pass
-
-    try:
-        pyautogui.press("f5")
-        time.sleep(5)
-    except pyautogui.FailSafeException:
-        _log("⚠ Fail-safe do PyAutoGUI disparou ao enviar F5. Ignorando.")
-    except Exception as e:
-        _log(f"⚠ Erro ao enviar F5 via PyAutoGUI: {e}")
-
-    _fechar_overlays_flow(driver)
+    # Refresh logo após Novo projeto (sua estratégia que funcionou melhor)
+    refresh_flow(driver, "após Novo projeto")
 
     _wait_visible(
         driver,
         By.XPATH,
         "//button[contains(., 'Nano Banana 2') and @aria-haspopup='menu']",
         timeout=30,
-        descricao="chip Nano Banana 2 após F5",
+        descricao="chip Nano Banana 2 após refresh",
     )
 
     abrir_chip_nano(driver)
     configurar_nano_video_9x16_x1_fast(driver)
 
-    try:
-        pyautogui.press("f5")
-        time.sleep(5)
-    except pyautogui.FailSafeException:
-        _log("⚠ Fail-safe do PyAutoGUI disparou ao enviar F5. Ignorando.")
-    except Exception as e:
-        _log(f"⚠ Erro ao enviar F5 via PyAutoGUI: {e}")
 
 # ============================================================================
 #   NANO / PROMPT / RESTO
@@ -567,6 +587,7 @@ def clicar_criar(driver):
 # ============================================================================
 #   MONITOR DE GERAÇÃO (COM % EM UMA LINHA)
 # ============================================================================
+
 
 ERRO_KEYWORDS = ["Falha", "Erro", "Violação"]
 
@@ -1088,6 +1109,17 @@ def gerar_video_humble(
 ):
     marker = f"[DBG-{uuid.uuid4().hex[:8]}]"
     _log(f"[DEBUG PROMPT] Marker (SO LOG): {marker}")
+
+    # Novo: refresh rápido antes de cada prompt, como você observou que ajuda
+    refresh_flow(driver, "antes de preencher o prompt")
+
+    _wait_visible(
+        driver,
+        By.XPATH,
+        "//div[@role='textbox' and @contenteditable='true']",
+        timeout=30,
+        descricao="campo prompt após refresh",
+    )
 
     preencher_prompt(driver, prompt)
 
