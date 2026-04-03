@@ -96,6 +96,7 @@ def criar_driver_humble(download_dir: Path | None = None):
     download_dir = Path(download_dir or DOWNLOAD_DIR)
 
     opts = Options()
+    opts.add_argument("--start-maximized")
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-logging")
@@ -124,8 +125,7 @@ def criar_driver_humble(download_dir: Path | None = None):
     )
 
     driver = webdriver.Chrome(service=service, options=opts)
-    # NÃO força maximizar, deixa o Chrome usar o último estado salvo pelo próprio Windows
-    # driver.maximize_window()
+    driver.maximize_window()
     return driver
 
 
@@ -314,25 +314,10 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
         )
 
     aguardar_flow_pronto(driver)
-
-    # primeira abertura do projeto
     clicar_novo_projeto(driver)
     abrir_chip_nano(driver)
     configurar_nano_video_9x16_x1_fast(driver)
 
-    # ajuste simples: em vez de F5, volta pro fluxo de "Novo projeto" de novo
-    _log("[HUMBLE] Reabrindo 'Novo projeto' para estabilizar a sessão antes do prompt...")
-    clicar_novo_projeto(driver)
-    abrir_chip_nano(driver)
-    configurar_nano_video_9x16_x1_fast(driver)
-
-    _wait_visible(
-        driver,
-        By.XPATH,
-        "//div[@role='textbox' and @contenteditable='true']",
-        timeout=30,
-        descricao="campo prompt após reabrir Novo projeto",
-    )
 
 # ============================================================================
 #   NANO / PROMPT / RESTO
