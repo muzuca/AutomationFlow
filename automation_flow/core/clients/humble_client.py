@@ -54,7 +54,6 @@ def _log(msg: str):
 #   DETECÇÃO DE CONTA DESATIVADA
 # ============================================================================
 
-
 def detectar_conta_google_desativada(driver, timeout=5) -> str | None:
     """
     Retorna o e-mail detectado se a tela 'Sua conta foi desativada' estiver visível.
@@ -88,15 +87,90 @@ def detectar_conta_google_desativada(driver, timeout=5) -> str | None:
 
 
 # ============================================================================
-#   DRIVER
+#   POSICIONAMENTO DE JANELAS (CHROME + POWERSHELL)
 # ============================================================================
 
+def ajustar_chrome_para_area_livre(driver):
+    """
+    Posiciona a janela do Chrome para ocupar a área acima do PowerShell.
+
+    Lógica:
+    - detecta resolução da tela;
+    - procura janela do PowerShell (normal ou Administrador);
+    - se achar, usa o topo dessa janela como "linha de corte":
+        Chrome ocupa (0, 0) até (largura_tela, top_powershell);
+    - se não achar, apenas maximiza a janela do Chrome.
+    """
+    try:
+        # garante que o driver tem uma janela ativa
+        driver.maximize_window()
+    except Exception:
+        pass
+
+    try:
+        screen_w, screen_h = pyautogui.size()
+    except Exception:
+        screen_w, screen_h = (1920, 1080)
+
+    try:
+        # procura janelas de PowerShell típicas
+        ps_windows = [
+            w for w in gw.getAllWindows()
+            if w.title
+            and (
+                "Windows PowerShell" in w.title
+                or "Administrador: Windows PowerShell" in w.title
+            )
+        ]
+    except Exception:
+        ps_windows = []
+
+    if not ps_windows:
+        # fallback: deixa maximizado como antes
+        try:
+            driver.maximize_window()
+        except Exception:
+            pass
+        return
+
+    # pega a janela mais "baixa" (maior .top), no caso de ter mais de uma
+    ps = sorted(ps_windows, key=lambda w: w.top)[-1]
+
+    top_powershell = ps.top
+    if top_powershell <= 0 or top_powershell > screen_h:
+        # coordenada esquisita, não arrisca
+        try:
+            driver.maximize_window()
+        except Exception:
+            pass
+        return
+
+    largura = screen_w
+    altura = max(400, top_powershell)  # garante altura mínima
+
+    try:
+        driver.set_window_position(0, 0)
+        driver.set_window_size(largura, altura)
+        _log(
+            f"[HUMBLE] Janela do Chrome ajustada para 0,0 "
+            f"com {largura}x{altura} (acima do PowerShell)."
+        )
+    except Exception as e:
+        _log(f"[HUMBLE] Falha ao ajustar janela do Chrome: {e}")
+        try:
+            driver.maximize_window()
+        except Exception:
+            pass
+
+
+# ============================================================================
+#   DRIVER
+# ============================================================================
 
 def criar_driver_humble(download_dir: Path | None = None):
     download_dir = Path(download_dir or DOWNLOAD_DIR)
 
     opts = Options()
-    opts.add_argument("--start-maximized")
     opts.add_argument("--disable-blink-features=AutomationControlled")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-logging")
@@ -125,7 +199,10 @@ def criar_driver_humble(download_dir: Path | None = None):
     )
 
     driver = webdriver.Chrome(service=service, options=opts)
-    driver.maximize_window()
+
+    # em vez de só maximizar, ajusta para o espaço livre acima do PowerShell
+    ajustar_chrome_para_area_livre(driver)
+
     return driver
 
 
@@ -149,7 +226,6 @@ def _wait_visible(driver, by, value, timeout=WAIT, descricao="elemento"):
 # ============================================================================
 #   FUNÇÃO CENTRAL DE REFRESH
 # ============================================================================
-
 
 def refresh_flow(driver, motivo: str = ""):
     """
@@ -192,7 +268,6 @@ def refresh_flow(driver, motivo: str = ""):
 # ============================================================================
 #   LOGIN + PREPARO
 # ============================================================================
-
 
 def abrir_flow(driver):
     _log(f"[HUMBLE] Abrindo Flow: {HUMBLE_FLOW_URL}")
@@ -430,7 +505,6 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
 #   NANO / PROMPT / RESTO
 # ============================================================================
 
-
 def abrir_chip_nano(driver):
     _log("[HUMBLE] Abrindo chip Nano Banana 2...")
     chip_xpath = "//button[contains(., 'Nano Banana 2') and @aria-haspopup='menu']"
@@ -587,7 +661,6 @@ def clicar_criar(driver):
 # ============================================================================
 #   MONITOR DE GERAÇÃO (COM % EM UMA LINHA)
 # ============================================================================
-
 
 ERRO_KEYWORDS = ["Falha", "Erro", "Violação"]
 
@@ -943,7 +1016,6 @@ def aguardar_geracao_video(driver, prompt: str, timeout=420):
 # ============================================================================
 #   DOWNLOAD / CONCLUSÃO
 # ============================================================================
-
 
 def abrir_video_pronto(driver, tile_id: str | None = None, prompt: str | None = None):
     _log("[HUMBLE] Abrindo página do vídeo pronto...")
