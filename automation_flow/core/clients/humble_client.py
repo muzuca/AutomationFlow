@@ -355,28 +355,44 @@ def aguardar_flow_pronto(driver):
 
 def _fechar_popup_login_chrome():
     _log("[HUMBLE] Tentando fechar popup 'Fazer login no Chrome' (clique + ESC)...")
+
+    # Tenta focar a janela do Flow primeiro
+    win_flow = None
     try:
-        wins = [w for w in gw.getWindowsWithTitle("Flow -")]
+        wins = [w for w in gw.getAllWindows()
+                if w.title and "Flow" in w.title and "Chrome" not in w.title]
+        if not wins:
+            # fallback: qualquer janela do Chrome com Flow
+            wins = [w for w in gw.getAllWindows()
+                    if w.title and "labs.google" in w.title.lower()]
         if wins:
-            wins[0].activate()
+            win_flow = wins[0]
+            win_flow.activate()
             time.sleep(0.5)
     except Exception:
         pass
 
     try:
-        screen_w, screen_h = pyautogui.size()
-        cx = int(screen_w * 0.5)
-        cy = int(screen_h * 0.4)
+        if win_flow:
+            # clica no centro da JANELA do Chrome, não da tela toda
+            cx = win_flow.left + win_flow.width // 2
+            cy = win_flow.top + win_flow.height // 2
+        else:
+            screen_w, screen_h = pyautogui.size()
+            cx = int(screen_w * 0.5)
+            cy = int(screen_h * 0.3)  # um pouco mais acima para não pegar o PowerShell
+
         pyautogui.moveTo(cx, cy, duration=0.1)
         pyautogui.click()
-        time.sleep(0.2)
+        time.sleep(0.3)
         pyautogui.press("esc")
-        time.sleep(1)
+        time.sleep(0.5)
+        pyautogui.press("esc")  # segunda vez por segurança
+        time.sleep(0.5)
     except pyautogui.FailSafeException:
         _log("⚠ Fail-safe do PyAutoGUI disparou ao tentar fechar popup. Ignorando.")
     except Exception as e:
         _log(f"⚠ Erro ao tentar fechar popup (ignorado): {e}")
-
 
 def _fechar_overlays_flow(driver):
     """
@@ -472,23 +488,24 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
     abrir_flow(driver)
     clicar_create_with_flow(driver)
     fazer_login_google(driver, email, senha)
-
     _fechar_popup_login_chrome()
+    time.sleep(2)  # espera o popup realmente desaparecer
+
+    # segunda tentativa de fechar qualquer overlay
+    try:
+        _fechar_overlays_flow(driver)
+    except Exception:
+        pass
 
     email_bloqueado = detectar_conta_google_desativada(driver, timeout=3)
     if email_bloqueado:
         raise HumbleAccountDisabledError(
             f"Conta Google desativada/bloqueada após popup: {email_bloqueado}"
         )
-
     aguardar_flow_pronto(driver)
     _fechar_overlays_flow(driver)
-
     clicar_novo_projeto(driver)
-
-    # Refresh logo após Novo projeto (sua estratégia que funcionou melhor)
     refresh_flow(driver, "após Novo projeto")
-
     _wait_visible(
         driver,
         By.XPATH,
@@ -496,7 +513,6 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
         timeout=30,
         descricao="chip Nano Banana 2 após refresh",
     )
-
     abrir_chip_nano(driver)
     configurar_nano_video_9x16_x1_fast(driver)
 
