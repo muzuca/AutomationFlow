@@ -419,7 +419,10 @@ def gerar_roteiro(
             cena, dialogo, tema_escolhido
         ),
         validar_dialogos=lambda cenas_json: _validar_dialogos(
-            cenas_json, estrutura_cenas
+            cenas_json,
+            tema_escolhido,
+            mensagem_central,
+            estrutura_cenas,
         ),
         min_palavras=MIN_PALAVRAS,
         max_palavras=MAX_PALAVRAS,
