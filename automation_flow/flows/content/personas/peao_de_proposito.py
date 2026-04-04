@@ -2,23 +2,36 @@
 Persona: Peão de Propósito
 Arquivo único com tudo que define o Peão: identidade, visual Veo3, temas e gerador.
 Roteiros focados em fé, salmos, motivação e superação em contexto de fazenda.
-"""
-from automation_flow.flows.content.roteiro_core import gerar_roteiro_generico, _contar_palavras
 
+Regras extras:
+- Cada diálogo de cena (áudio) DEVE ter entre 20 e 22 palavras (aprox. 8 segundos).
+- Evitar repetição de temas aleatórios recentes (quando houver histórico).
+- Evitar repetição de falas/contexts muito parecidos com os últimos roteiros (via regras no prompt).
+"""
+
+import random
+
+from automation_flow.flows.content.roteiro_core import (
+    gerar_roteiro_generico,
+    contar_palavras,
+)
 
 # ── Identidade ────────────────────────────────────────────────────────────────
-ID           = "PeaoDeProposito"
-NOME         = "Peão de Propósito"
-CENAS_PADRAO = 3               # valor padrão
-USA_SIGNOS   = False
-SIGNOS       = []
-TEMA_PADRAO  = "aleatorio"     # para o menu usar como padrão
+ID = "PeaoDeProposito"
+NOME = "Peão de Propósito"
+CENAS_PADRAO = 3
+USA_SIGNOS = False
+SIGNOS: list[str] = []
+TEMA_PADRAO = "aleatorio"
 
+HISTORICO_MAX = 100
+MIN_PALAVRAS = 15
+MAX_PALAVRAS = 25
 
 # ── Temas ─────────────────────────────────────────────────────────────────────
 TEMAS = {
-    "fe":        "mensagens de fé e confiança em Deus no meio da rotina do campo",
-    "salmos":    "reflexões e consolo baseados em salmos e textos bíblicos",
+    "fe": "mensagens de fé e confiança em Deus no meio da rotina do campo",
+    "salmos": "reflexões e consolo baseados em salmos e textos bíblicos",
     "superacao": "motivação para quem está cansado, lutando e quase desistindo",
     "aleatorio": None,
 }
@@ -30,7 +43,6 @@ def tema_exige_signo(tema: str) -> bool:
 
 def fallback_mensagem(tema: str) -> str:
     return f"mensagem de fé, salmos e superação em ambiente de fazenda ({tema})"
-
 
 # ── Blocos fixos do prompt Veo3 ───────────────────────────────────────────────
 CHARACTER_BLOCK = (
@@ -77,7 +89,7 @@ AUDIO_BLOCK = (
 )
 TECH_BLOCK = (
     "Model: veo-3\n"
-    "Length: 6 seconds\n"
+    "Length: 8 seconds\n"
     "Resolution: 1080p (9:16)\n"
     "Framerate: 24fps\n"
     "Negative prompt: No branding, no readable text, no fantasy effects, no facial change, "
@@ -86,7 +98,6 @@ TECH_BLOCK = (
 VOICE_STYLE = (
     "Voice: deep Brazilian male voice, calm and gentle, with rural accent, speaking with spiritual, encouraging and peaceful tone."
 )
-
 
 # ── Cenas base dinâmicas ──────────────────────────────────────────────────────
 CENA_INICIAL = {
@@ -142,7 +153,6 @@ CENA_FINAL = {
     ),
 }
 
-
 # ── Instrução do sistema Gemini ───────────────────────────────────────────────
 _INSTRUCAO_SISTEMA = (
     "Você é um especialista em criação de roteiros curtos de fé, salmos, motivação e superação "
@@ -153,26 +163,22 @@ _INSTRUCAO_SISTEMA = (
     "Responda SEMPRE em JSON válido, sem markdown, sem explicações fora do JSON."
 )
 
-
+# ── Estrutura dinâmica de cenas ───────────────────────────────────────────────
 def _gerar_estrutura_cenas(n_cenas: int) -> list[dict]:
-    """Gera estrutura com n_cenas dinâmico: 1 = gancho, última = CTA. Para o Peão, mínimo 3 funciona melhor."""
+    """Gera estrutura com n_cenas dinâmico: 1 = gancho, última = CTA."""
     n_cenas = max(2, int(n_cenas))
     cenas: list[dict] = []
 
-    # cena 1: gancho
     cenas.append({"numero": 1, **CENA_INICIAL})
 
-    # cenas do meio
     total_meio = n_cenas - 2
     for i in range(total_meio):
         base = CENAS_MEIO[i % len(CENAS_MEIO)].copy()
         base["numero"] = i + 2
         cenas.append(base)
 
-    # última: CTA
     cenas.append({"numero": n_cenas, **CENA_FINAL})
     return cenas
-
 
 # ── Montador de prompt Veo3 ───────────────────────────────────────────────────
 def _escolher_background(tema: str) -> str:
@@ -196,25 +202,143 @@ def _montar_prompt(cena: dict, dialogo: str, tema: str) -> str:
         f"{LIGHTING_BLOCK}\n\n"
         f"Action: {cena['action']}\n\n"
         f"{STYLE_BLOCK}\n\n"
+        "Dialogue rules:\n"
+        "- Spoken in Brazilian Portuguese.\n"
+        "- Single continuous sentence per scene.\n"
+        f"- STRICT length: around 20 words per scene (one single sentence).\n"
+        "- Natural, rural, spiritual and easy to speak within an 8-second clip.\n\n"
         f"Dialogue: spoken in Brazilian Portuguese [{VOICE_STYLE}, {cena['tone']}]\n"
         f'"{d}"\n\n'
         f"{AUDIO_BLOCK}\n"
         f"{TECH_BLOCK}"
     )
 
+# ── Ajuste automático de diálogo (desativado) ─────────────────────────────────
+def _ajustar_dialogo(dialogo: str) -> str:
+    """
+    Stub mantido apenas por compatibilidade.
+    NÃO deve cortar ou alterar o diálogo.
+    O ajuste agora é responsabilidade do core via tentativas extras.
+    """
+    return dialogo
 
 # ── Validação de diálogos ─────────────────────────────────────────────────────
-def _validar_dialogos(cenas_json: list) -> list[str]:
-    avisos = []
+def _validar_dialogos(
+    cenas_json: list,
+    tema: str,
+    mensagem_central: str,
+    estrutura_cenas: list,
+) -> list[str]:
+    avisos: list[str] = []
+    erro_grave = False
+
     for c in cenas_json:
-        n = _contar_palavras(c.get("dialogo", ""))
-        if n != 19:
+        dialogo = c.get("dialogo", "") or ""
+        n = contar_palavras(dialogo)
+
+        if not (MIN_PALAVRAS <= n <= MAX_PALAVRAS):
             avisos.append(
-                f"  ⚠ Cena {c['numero']} ({c['nome']}): {n} palavras "
-                f"(esperado: 19) — '{c.get('dialogo', '')[:60]}...'"
+                f"  ⚠ Cena {c.get('numero','?')} ({c.get('nome','?')}): "
+                f"{n} palavras relevantes (faixa esperada {MIN_PALAVRAS}–{MAX_PALAVRAS}) — "
+                f"'{dialogo[:60]}...'"
             )
+
+        if n < MIN_PALAVRAS or n > MAX_PALAVRAS:
+            erro_grave = True
+
+    if erro_grave:
+        raise ValueError(
+            f"Diálogos fora da margem aceitável "
+            f"(precisam estar entre {MIN_PALAVRAS} e {MAX_PALAVRAS} palavras)."
+        )
+
     return avisos
 
+# ── Utilitários de histórico / não repetição ─────────────────────────────────
+def _escolher_tema(tema: str, historico: list[dict]) -> str:
+    """
+    - Se tema != 'aleatorio', retorna o próprio tema.
+    - Se tema == 'aleatorio', escolhe um tema que NÃO esteja entre os mais recentes do histórico,
+      se possível.
+    """
+    if tema != "aleatorio":
+        return tema
+
+    temas_fixos = [t for t in TEMAS.keys() if t != "aleatorio"]
+    usados_recentemente = {item.get("tema") for item in historico[-HISTORICO_MAX:]}
+    candidatos = [t for t in temas_fixos if t not in usados_recentemente]
+
+    if candidatos:
+        return random.choice(candidatos)
+
+    return random.choice(temas_fixos)
+
+
+def _montar_regras_nao_repeticao(historico: list[dict]) -> str:
+    """
+    Gera instruções para o modelo evitando repetição de falas/temas recentes.
+    """
+    if not historico:
+        return ""
+
+    recentes = historico[-HISTORICO_MAX:]
+    temas_recent = {item.get("tema") for item in recentes if item.get("tema")}
+    exemplos_falas: list[str] = []
+
+    for item in recentes:
+        for fala in item.get("falas", [])[:1]:
+            exemplos_falas.append(fala)
+            if len(exemplos_falas) >= 10:
+                break
+        if len(exemplos_falas) >= 10:
+            break
+
+    regras = "REGRAS DE NÃO REPETIÇÃO:\n"
+
+    if temas_recent:
+        regras += (
+            "- Evite repetir roteiros idênticos aos últimos temas já usados recentemente: "
+            + ", ".join(sorted(list(temas_recent)))
+            + ". Use abordagens novas, metáforas e imagens diferentes.\n"
+        )
+
+    if exemplos_falas:
+        regras += (
+            "- NÃO repita frases, ganchos ou descrições muito parecidas com estes exemplos já usados antes. "
+            "Crie novas imagens do campo, novas formas de falar de colheita, choro e esperança:\n"
+        )
+        for ex in exemplos_falas:
+            regras += f'  • "{ex[:80]}..."\n'
+
+    regras += (
+        "- Mantenha o mesmo estilo simples, rural e espiritual do Peão, mas sempre com falas inéditas, "
+        "sem copiar a estrutura exata ou as mesmas imagens de vídeos anteriores.\n"
+    )
+
+    return regras
+
+# ── Helper para atualizar histórico (usado fora) ─────────────────────────────
+def atualizar_historico_peao(
+    historico: list[dict],
+    novo_roteiro: dict,
+    tema: str,
+    mensagem_central: str,
+) -> list[dict]:
+    """
+    Recebe o histórico anterior + o dict retornado por gerar_roteiro
+    e devolve um novo histórico já truncado nos últimos HISTORICO_MAX.
+    """
+    cenas = novo_roteiro.get("cenas", [])
+    falas = [c.get("dialogo", "") for c in cenas if c.get("dialogo")]
+
+    item = {
+        "tema": tema,
+        "mensagem_central": mensagem_central,
+        "falas": falas,
+    }
+
+    historico_novo = (historico or []) + [item]
+    return historico_novo[-HISTORICO_MAX:]
 
 # ── Gerador principal ─────────────────────────────────────────────────────────
 def gerar_roteiro(
@@ -222,8 +346,21 @@ def gerar_roteiro(
     mensagem_central: str,
     signo: str | None,
     n_cenas: int = CENAS_PADRAO,
+    historico: list[dict] | None = None,
 ) -> dict:
+    """
+    historico: lista com os últimos roteiros dessa persona.
+      Cada item sugerido:
+      {
+        "tema": "fe",
+        "mensagem_central": "...",
+        "falas": ["fala cena1", "fala cena2", ...],
+        "hash_contexto": "string-opcional"
+      }
+    """
+    historico = historico or []
     n_cenas = max(2, int(n_cenas))
+    tema_escolhido = _escolher_tema(tema, historico)
     estrutura_cenas = _gerar_estrutura_cenas(n_cenas)
 
     descricao_cenas = "\n".join(
@@ -231,25 +368,34 @@ def gerar_roteiro(
     )
     exemplos_json = ",\n".join(
         [
-            f'    {{"numero\": {c["numero"]}, "nome": "{c["nome"]}", '
-            f'"texto_tela": "TEXTO CURTO", "dialogo": "frase de fé com 19 palavras"}}'
+            f'    {{"numero": {c["numero"]}, "nome": "{c["nome"]}", '
+            f'"texto_tela": "TEXTO CURTO", "dialogo": "frase de fé natural"}}'
             for c in estrutura_cenas
         ]
     )
 
+    regras_nao_repeticao = _montar_regras_nao_repeticao(historico)
+
     mensagem_usuario = (
         f"Crie um roteiro de {n_cenas} cenas para o personagem Peão de Propósito:\n"
-        f"- Tema: {tema}\n"
+        f"- Tema: {tema_escolhido}\n"
         f"- Mensagem central: {mensagem_central}\n\n"
-        "REGRAS OBRIGATÓRIAS:\n"
+        "REGRAS OBRIGATÓRIAS GERAIS:\n"
         f"1. Gere EXATAMENTE {n_cenas} cenas\n"
         "2. A cena 1 DEVE ser um gancho emocional forte, reconhecendo a dor e a luta de quem assiste\n"
         f"3. A cena {n_cenas} DEVE ser um CTA claro pedindo para comentar, escrever 'Amém' ou compartilhar\n"
         "4. As cenas do meio devem conectar o cenário da fazenda com as lutas internas e a esperança em Deus\n"
-        "5. A fala (dialogo) de CADA cena deve ter EXATAMENTE 19 palavras em português brasileiro\n"
-        "6. texto_tela: frase curta impactante (máx 6 palavras), em MAIÚSCULAS, pode ter 1 emoji de fé ou força\n"
-        "7. Linguagem simples, rural, espiritual, trazendo consolo, fé e motivação, sem sensacionalismo\n\n"
-        f"ESTRUTURA DAS CENAS:\n{descricao_cenas}\n\n"
+        "5. Linguagem simples, rural, espiritual, trazendo consolo, fé e motivação, sem sensacionalismo\n"
+        "6. texto_tela: frase curta impactante (máx 6 palavras), em MAIÚSCULAS, pode ter 1 emoji de fé ou força\n\n"
+        "REGRAS ESPECÍFICAS PARA O DIÁLOGO (ÁUDIO):\n"
+        "- Cada cena deve ter UM ÚNICO diálogo contínuo.\n"
+        f"- O diálogo de cada cena DEVE ter ENTRE {MIN_PALAVRAS} e {MAX_PALAVRAS} palavras.\n"
+        f"- Se um diálogo ficar maior que {MAX_PALAVRAS} palavras, imagine que o áudio fica corrido e ruim; então reduza.\n"
+        f"- Se ficar menor que {MIN_PALAVRAS} palavras, expanda um pouco com detalhes naturais, sem enrolar.\n"
+        "- Nunca quebre o diálogo em duas falas; é sempre uma fala única por cena.\n\n"
+        f"{regras_nao_repeticao}\n"
+        "ESTRUTURA DAS CENAS:\n"
+        f"{descricao_cenas}\n\n"
         "Retorne EXATAMENTE este JSON (sem markdown):\n"
         "{\n"
         '  "cenas": [\n'
@@ -260,12 +406,24 @@ def gerar_roteiro(
         "}"
     )
 
-    print(f"\n[ROTEIRO] Gerando roteiro — Peão de Propósito | Tema: {tema} | Cenas: {n_cenas}")
-    return gerar_roteiro_generico(
+    print(
+        f"\n[ROTEIRO] Gerando roteiro — Peão de Propósito | Tema: {tema_escolhido} | Cenas: {n_cenas}"
+    )
+
+    resultado = gerar_roteiro_generico(
         instrucao_sistema=_INSTRUCAO_SISTEMA,
         mensagem_usuario=mensagem_usuario,
         estrutura_cenas=estrutura_cenas,
         n_cenas=n_cenas,
-        builder_prompt_veo3=lambda cena, dialogo: _montar_prompt(cena, dialogo, tema),
-        validar_dialogos=_validar_dialogos,
+        builder_prompt_veo3=lambda cena, dialogo: _montar_prompt(
+            cena, dialogo, tema_escolhido
+        ),
+        validar_dialogos=lambda cenas_json: _validar_dialogos(
+            cenas_json, estrutura_cenas
+        ),
+        min_palavras=MIN_PALAVRAS,
+        max_palavras=MAX_PALAVRAS,
     )
+
+    resultado["tema_efetivo"] = tema_escolhido
+    return resultado
