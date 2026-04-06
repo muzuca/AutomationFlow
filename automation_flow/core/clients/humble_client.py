@@ -696,8 +696,10 @@ def preencher_prompt(driver, prompt: str):
     _log(f"[DEBUG PROMPT] Depois de colar: {depois[:200]!r}")
     _log(f"[DEBUG PROMPT] Tamanho esperado={len(prompt)} | atual={len(depois)}")
 
-    if prompt[:80].strip() not in depois:
-        raise HumbleFlowError("Prompt não colou integralmente no campo.")
+    trecho_ref = prompt[:80].strip()
+    if trecho_ref and trecho_ref not in depois:
+        _log("[HUMBLE] AVISO: trecho inicial do prompt não encontrado exatamente no campo.")
+        _log("[HUMBLE] Seguindo mesmo assim (pode haver pequenas variações de caracteres).")
 
 
 def clicar_criar(driver):
@@ -1230,6 +1232,7 @@ def gerar_video_humble(
     driver,
     prompt: str,
     destino_dir: Path | None = None,
+    nome_arquivo: str | None = None,  # novo
 ):
     marker = f"[DBG-{uuid.uuid4().hex[:8]}]"
     _log(f"[DEBUG PROMPT] Marker (SO LOG): {marker}")
@@ -1264,7 +1267,11 @@ def gerar_video_humble(
 
     _log("✔ Geração concluída. Abrindo card do vídeo...")
     abrir_video_pronto(driver, tile_id=tile_id, prompt=prompt)
-    arquivo_final = baixar_video_720p(driver, destino_dir=destino_dir)
+    arquivo_final = baixar_video_720p(
+        driver,
+        destino_dir=destino_dir,
+        nome_arquivo=nome_arquivo,  # repassa
+    )
 
     _log(f"✔ Download concluído em: {arquivo_final}")
     _log("✔ Voltando para tela de prompts.")

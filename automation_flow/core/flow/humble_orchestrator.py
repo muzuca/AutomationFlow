@@ -372,8 +372,8 @@ def processar_tarefa_anuncio(tarefa) -> Path:
             video = gerar_video_humble(
                 driver=driver,
                 prompt=roteiro,
-                destinodir=tarefa.dir_concluido,
-                nomearquivo=nome_arquivo,
+                destino_dir=tarefa.dir_concluido,
+                nome_arquivo=nome_arquivo,
             )
 
             _log(
