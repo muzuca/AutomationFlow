@@ -1,6 +1,7 @@
 # conteudo/menu.py
 from automation_flow.flows.content import personas
 
+
 SIGNOS_LISTA = [
     "Áries", "Touro", "Gêmeos", "Câncer", "Leão", "Virgem",
     "Libra", "Escorpião", "Sagitário", "Capricórnio", "Aquário", "Peixes",
@@ -116,7 +117,11 @@ def selecionar_signo(pid: str) -> str | None:
         label = SIGNOS_LABEL.get(s, s)
         marcador = " [padrão]" if s == signo_padrao else ""
         print(f"  {i:2}. {label}{marcador}")
-    padrao_idx = SIGNOS_LISTA.index(signo_padrao) + 1 if signo_padrao in SIGNOS_LISTA else len(SIGNOS_LISTA)
+    padrao_idx = (
+        SIGNOS_LISTA.index(signo_padrao) + 1
+        if signo_padrao in SIGNOS_LISTA
+        else len(SIGNOS_LISTA)
+    )
     while True:
         try:
             entrada = input(f"  Signo [1-{len(SIGNOS_LISTA)}] [{padrao_idx}]: ").strip()
@@ -149,8 +154,40 @@ def selecionar_motor() -> str:
         print("  Digite 1 ou 2.")
 
 
+# ---------------------------------------------------------------------------
+# NOVO — seleção do modo de operação (conteúdo orgânico vs anúncios)
+# ---------------------------------------------------------------------------
+def selecionar_modo_operacao() -> str:
+    cabecalho("MODO DE OPERAÇÃO")
+    print("  1. Conteúdo orgânico  (Ana Cartomante, Coach, Geraldo, Peão)  [padrão]")
+    print("  2. Anúncios de produtos  (AnaIndica, LaraSelect — TikTok Shop)")
+    while True:
+        entrada = input("  Modo [1/2] [1]: ").strip()
+        if not entrada or entrada == "1":
+            print("  Modo: Conteúdo orgânico")
+            return "conteudo"
+        if entrada == "2":
+            print("  Modo: Anúncios de produtos")
+            return "anuncios"
+        print("  Digite 1 ou 2.")
+
+
 def exibir_menu() -> dict:
     cabecalho("AUTOMAÇÃO DE VÍDEOS — CONFIGURAÇÃO DA SESSÃO")
+
+    # -----------------------------------------------------------------------
+    # NOVO — primeira pergunta: modo de operação
+    # -----------------------------------------------------------------------
+    linha("-", 52)
+    modo_operacao = selecionar_modo_operacao()
+
+    if modo_operacao == "anuncios":
+        from automation_flow.flows.anuncios.menu_anuncios import exibir_menu_anuncios
+        return exibir_menu_anuncios()
+
+    # -----------------------------------------------------------------------
+    # ORIGINAL — fluxo de conteúdo orgânico (sem alteração alguma)
+    # -----------------------------------------------------------------------
     linha("-", 52)
     motor = selecionar_motor()
 
@@ -206,7 +243,10 @@ def exibir_menu() -> dict:
     print(f"  Personagens:  {len(personagens_config)}")
     for p in personagens_config:
         signo_str = p["signo"] if p["signo"] else "—"
-        print(f"    {p['nome']} | {signo_str} | {p['tema'].capitalize()} | {p['cenas_por_video']} cenas/vídeo")
+        print(
+            f"    {p['nome']} | {signo_str} | "
+            f"{p['tema'].capitalize()} | {p['cenas_por_video']} cenas/vídeo"
+        )
     print(f"  Total por ciclo: {len(personagens_config) * videos_por_personagem} vídeos\n")
 
     if not perguntar_sim_nao("  Confirmar e iniciar?", padrao=True):
@@ -214,6 +254,7 @@ def exibir_menu() -> dict:
         return exibir_menu()
 
     return {
+        "modo_operacao": "conteudo",   # ← adicionado para main.py distinguir o fluxo
         "modo": modo,
         "motor": motor,
         "videos_por_personagem": videos_por_personagem,

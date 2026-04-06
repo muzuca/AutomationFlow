@@ -54,6 +54,7 @@ def _log(msg: str):
 #   DETECÇÃO DE CONTA DESATIVADA
 # ============================================================================
 
+
 def detectar_conta_google_desativada(driver, timeout=5) -> str | None:
     """
     Retorna o e-mail detectado se a tela 'Sua conta foi desativada' estiver visível.
@@ -90,6 +91,7 @@ def detectar_conta_google_desativada(driver, timeout=5) -> str | None:
 #   POSICIONAMENTO DE JANELAS (CHROME + POWERSHELL)
 # ============================================================================
 
+
 def ajustar_chrome_para_area_livre(driver):
     """
     Posiciona a janela do Chrome para ocupar a área acima do PowerShell.
@@ -98,11 +100,10 @@ def ajustar_chrome_para_area_livre(driver):
     - detecta resolução da tela;
     - procura janela do PowerShell (normal ou Administrador);
     - se achar, usa o topo dessa janela como "linha de corte":
-        Chrome ocupa (0, 0) até (largura_tela, top_powershell);
+      Chrome ocupa (0, 0) até (largura_tela, top_powershell);
     - se não achar, apenas maximiza a janela do Chrome.
     """
     try:
-        # garante que o driver tem uma janela ativa
         driver.maximize_window()
     except Exception:
         pass
@@ -113,7 +114,6 @@ def ajustar_chrome_para_area_livre(driver):
         screen_w, screen_h = (1920, 1080)
 
     try:
-        # procura janelas de PowerShell típicas
         ps_windows = [
             w for w in gw.getAllWindows()
             if w.title
@@ -126,19 +126,16 @@ def ajustar_chrome_para_area_livre(driver):
         ps_windows = []
 
     if not ps_windows:
-        # fallback: deixa maximizado como antes
         try:
             driver.maximize_window()
         except Exception:
             pass
         return
 
-    # pega a janela mais "baixa" (maior .top), no caso de ter mais de uma
     ps = sorted(ps_windows, key=lambda w: w.top)[-1]
 
     top_powershell = ps.top
     if top_powershell <= 0 or top_powershell > screen_h:
-        # coordenada esquisita, não arrisca
         try:
             driver.maximize_window()
         except Exception:
@@ -146,7 +143,7 @@ def ajustar_chrome_para_area_livre(driver):
         return
 
     largura = screen_w
-    altura = max(400, top_powershell)  # garante altura mínima
+    altura = max(400, top_powershell)
 
     try:
         driver.set_window_position(0, 0)
@@ -166,6 +163,7 @@ def ajustar_chrome_para_area_livre(driver):
 # ============================================================================
 #   DRIVER
 # ============================================================================
+
 
 def criar_driver_humble(download_dir: Path | None = None):
     download_dir = Path(download_dir or DOWNLOAD_DIR)
@@ -199,10 +197,7 @@ def criar_driver_humble(download_dir: Path | None = None):
     )
 
     driver = webdriver.Chrome(service=service, options=opts)
-
-    # em vez de só maximizar, ajusta para o espaço livre acima do PowerShell
     ajustar_chrome_para_area_livre(driver)
-
     return driver
 
 
@@ -227,6 +222,7 @@ def _wait_visible(driver, by, value, timeout=WAIT, descricao="elemento"):
 #   FUNÇÃO CENTRAL DE REFRESH
 # ============================================================================
 
+
 def refresh_flow(driver, motivo: str = ""):
     """
     Dá um F5 real na janela do Flow via PyAutoGUI, fecha overlays
@@ -238,7 +234,6 @@ def refresh_flow(driver, motivo: str = ""):
         msg += f" ({motivo})"
     _log(msg + "...")
 
-    # Tenta focar a janela do Flow
     try:
         wins = [w for w in gw.getWindowsWithTitle("Flow -")]
         if wins:
@@ -247,7 +242,6 @@ def refresh_flow(driver, motivo: str = ""):
     except Exception:
         pass
 
-    # F5 real no navegador
     try:
         pyautogui.press("f5")
     except pyautogui.FailSafeException:
@@ -255,10 +249,8 @@ def refresh_flow(driver, motivo: str = ""):
     except Exception as e:
         _log(f"⚠ Erro ao enviar F5 via PyAutoGUI: {e}")
 
-    # Espera curto para recarregar
     time.sleep(3)
 
-    # Fecha eventuais overlays que aparecem logo após o refresh
     try:
         _fechar_overlays_flow(driver)
     except Exception:
@@ -268,6 +260,7 @@ def refresh_flow(driver, motivo: str = ""):
 # ============================================================================
 #   LOGIN + PREPARO
 # ============================================================================
+
 
 def abrir_flow(driver):
     _log(f"[HUMBLE] Abrindo Flow: {HUMBLE_FLOW_URL}")
@@ -353,46 +346,57 @@ def aguardar_flow_pronto(driver):
     raise HumbleFlowError("Flow não ficou pronto após login.")
 
 
-def _fechar_popup_login_chrome():
-    _log("[HUMBLE] Tentando fechar popup 'Fazer login no Chrome' (clique + ESC)...")
+def _fechar_popup_login_chrome(driver):
+    """
+    Tenta fechar o popup 'Fazer login no Chrome' focando a janela do Selenium
+    e clicando no centro REAL da janela do Chrome (monitor correto), depois ESC.
+    """
+    _log("[HUMBLE] Tentando fechar popup 'Fazer login no Chrome' (janela do driver + ESC)...")
 
-    # Tenta focar a janela do Flow primeiro
-    win_flow = None
     try:
-        wins = [w for w in gw.getAllWindows()
-                if w.title and "Flow" in w.title and "Chrome" not in w.title]
-        if not wins:
-            # fallback: qualquer janela do Chrome com Flow
-            wins = [w for w in gw.getAllWindows()
-                    if w.title and "labs.google" in w.title.lower()]
-        if wins:
-            win_flow = wins[0]
-            win_flow.activate()
-            time.sleep(0.5)
+        driver.switch_to.window(driver.current_window_handle)
+        time.sleep(0.1)
     except Exception:
         pass
 
+    rect = None
     try:
-        if win_flow:
-            # clica no centro da JANELA do Chrome, não da tela toda
-            cx = win_flow.left + win_flow.width // 2
-            cy = win_flow.top + win_flow.height // 2
+        rect = driver.get_window_rect()
+    except Exception as e:
+        _log(f"⚠ Não consegui ler get_window_rect(): {e}")
+
+    try:
+        if rect:
+            x = int(rect.get("x", 0))
+            y = int(rect.get("y", 0))
+            w = int(rect.get("width", 1200))
+            h = int(rect.get("height", 800))
+
+            cx = x + w // 2
+            cy = y + h // 2
+
+            _log(f"[HUMBLE] Clique no Chrome via rect real: x={x}, y={y}, w={w}, h={h}, cx={cx}, cy={cy}")
         else:
             screen_w, screen_h = pyautogui.size()
             cx = int(screen_w * 0.5)
-            cy = int(screen_h * 0.3)  # um pouco mais acima para não pegar o PowerShell
+            cy = int(screen_h * 0.4)
+            _log(f"[HUMBLE] Fallback sem rect. Clique em cx={cx}, cy={cy}")
 
-        pyautogui.moveTo(cx, cy, duration=0.1)
+        pyautogui.moveTo(cx, cy, duration=0.15)
+        time.sleep(0.15)
         pyautogui.click()
-        time.sleep(0.3)
+        time.sleep(0.25)
+
         pyautogui.press("esc")
-        time.sleep(0.5)
-        pyautogui.press("esc")  # segunda vez por segurança
-        time.sleep(0.5)
+        time.sleep(0.4)
+        pyautogui.press("esc")
+        time.sleep(0.4)
+
     except pyautogui.FailSafeException:
         _log("⚠ Fail-safe do PyAutoGUI disparou ao tentar fechar popup. Ignorando.")
     except Exception as e:
         _log(f"⚠ Erro ao tentar fechar popup (ignorado): {e}")
+
 
 def _fechar_overlays_flow(driver):
     """
@@ -403,7 +407,6 @@ def _fechar_overlays_flow(driver):
     """
     _log("[HUMBLE] Verificando se há overlays/banners do Flow para fechar...")
 
-    # 1) ESC direto
     try:
         body = driver.find_element(By.TAG_NAME, "body")
         body.send_keys(Keys.ESCAPE)
@@ -411,7 +414,6 @@ def _fechar_overlays_flow(driver):
     except Exception:
         pass
 
-    # 2) Tenta clicar em botões comuns de fechamento
     xpaths_botoes = [
         "//button[span[normalize-space()='Comece já']]",
         "//button[normalize-space()='Comece já']",
@@ -435,7 +437,6 @@ def _fechar_overlays_flow(driver):
         except Exception:
             continue
 
-    # 3) Clique no fundo
     try:
         body = driver.find_element(By.TAG_NAME, "body")
         driver.execute_script("arguments[0].click();", body)
@@ -488,10 +489,9 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
     abrir_flow(driver)
     clicar_create_with_flow(driver)
     fazer_login_google(driver, email, senha)
-    _fechar_popup_login_chrome()
-    time.sleep(2)  # espera o popup realmente desaparecer
+    _fechar_popup_login_chrome(driver)
+    time.sleep(2)
 
-    # segunda tentativa de fechar qualquer overlay
     try:
         _fechar_overlays_flow(driver)
     except Exception:
@@ -502,6 +502,7 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
         raise HumbleAccountDisabledError(
             f"Conta Google desativada/bloqueada após popup: {email_bloqueado}"
         )
+
     aguardar_flow_pronto(driver)
     _fechar_overlays_flow(driver)
     clicar_novo_projeto(driver)
@@ -517,9 +518,47 @@ def fluxo_completo_login_e_preparo(driver, email: str, senha: str):
     configurar_nano_video_9x16_x1_fast(driver)
 
 
+def fluxo_login_simples_sem_preparo(driver, email: str, senha: str):
+    """
+    Faz apenas o login no Flow (Google + fechamento de popup/overlays),
+    sem clicar em 'Novo projeto' nem abrir/configurar Nano.
+
+    Uso ideal:
+        1. Criar driver com criar_driver_humble()
+        2. Chamar fluxo_login_simples_sem_preparo()
+        3. Reaproveitar esse driver para abrir o Gemini Web
+    """
+    abrir_flow(driver)
+    clicar_create_with_flow(driver)
+    fazer_login_google(driver, email, senha)
+    _fechar_popup_login_chrome(driver)
+    time.sleep(2)
+
+    try:
+        _fechar_overlays_flow(driver)
+    except Exception:
+        pass
+
+    email_bloqueado = detectar_conta_google_desativada(driver, timeout=3)
+    if email_bloqueado:
+        raise HumbleAccountDisabledError(
+            f"Conta Google desativada/bloqueada após popup: {email_bloqueado}"
+        )
+
+    aguardar_flow_pronto(driver)
+
+    try:
+        _fechar_overlays_flow(driver)
+    except Exception:
+        pass
+
+    _log("[HUMBLE] Login simples concluído. Flow pronto (sem Novo projeto / Nano).")
+
+
 # ============================================================================
 #   NANO / PROMPT / RESTO
 # ============================================================================
+
 
 def abrir_chip_nano(driver):
     _log("[HUMBLE] Abrindo chip Nano Banana 2...")
@@ -854,10 +893,6 @@ def _card_tem_erro(card) -> bool:
 
 
 def _extrair_percentual_card(card) -> int | None:
-    """
-    Tenta achar a porcentagem visível no card, ex.: 1%, 34%, 100%.
-    Retorna int ou None.
-    """
     candidatos_xpath = [
         ".//*[contains(text(), '%')]",
         ".//span[contains(text(), '%')]",
@@ -1033,6 +1068,7 @@ def aguardar_geracao_video(driver, prompt: str, timeout=420):
 #   DOWNLOAD / CONCLUSÃO
 # ============================================================================
 
+
 def abrir_video_pronto(driver, tile_id: str | None = None, prompt: str | None = None):
     _log("[HUMBLE] Abrindo página do vídeo pronto...")
 
@@ -1198,7 +1234,6 @@ def gerar_video_humble(
     marker = f"[DBG-{uuid.uuid4().hex[:8]}]"
     _log(f"[DEBUG PROMPT] Marker (SO LOG): {marker}")
 
-    # Novo: refresh rápido antes de cada prompt, como você observou que ajuda
     refresh_flow(driver, "antes de preencher o prompt")
 
     _wait_visible(

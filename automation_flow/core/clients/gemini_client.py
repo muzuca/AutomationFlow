@@ -1,4 +1,4 @@
-# gemini_client.py
+# automation_flow > core > clients > gemini_client.py
 import os
 import re
 import time

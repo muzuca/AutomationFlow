@@ -5,12 +5,16 @@ import random
 from pathlib import Path
 from datetime import datetime
 
+
 from dotenv import load_dotenv
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 load_dotenv(PROJECT_ROOT / ".env", override=True)
 
+
 sys.path.insert(0, str(PROJECT_ROOT))
+
 
 from automation_flow.flows.content import personas
 from automation_flow.flows.content.menu import exibir_menu
@@ -18,6 +22,7 @@ from automation_flow.flows.content.historico import registrar_roteiro, roteiro_e
 from automation_flow.flows.content.scheduler import aguardar_proxima_janela
 from automation_flow.flows.content.video_manager import processar_videos
 from acesso_humble import sincronizar_credenciais_humble
+
 
 
 MAX_RETRIES_ROTEIRO = 3
@@ -30,8 +35,10 @@ VARIACOES_MENSAGEM = [
 ]
 
 
+
 def linha(char: str = "=", largura: int = 55) -> None:
     print(char * largura)
+
 
 
 def _resolver_motor(motor: str):
@@ -40,6 +47,7 @@ def _resolver_motor(motor: str):
         return fn, "Humble"
     from automation_flow.core.flow.guru_orchestrator import main as fn
     return fn, "Guru"
+
 
 
 def _resolver_signo(persona, signo_config: str | None, tema_final: str) -> str | None:
@@ -57,6 +65,7 @@ def _resolver_signo(persona, signo_config: str | None, tema_final: str) -> str |
     return "Todos os signos"
 
 
+
 def _resolver_tema(persona, tema_escolhido: str) -> tuple[str, str]:
     temas_fixos = [t for t in persona.TEMAS if t != "aleatorio"]
 
@@ -71,6 +80,7 @@ def _resolver_tema(persona, tema_escolhido: str) -> tuple[str, str]:
         mensagem = persona.fallback_mensagem(tema_final)
 
     return tema_final, mensagem
+
 
 
 def gerar_roteiro_sem_repeticao(
@@ -112,6 +122,7 @@ def gerar_roteiro_sem_repeticao(
         return roteiro, tema_final, mensagem, signo_final
 
     return None, None, None, None
+
 
 
 def executar_ciclo(config: dict):
@@ -175,7 +186,7 @@ def executar_ciclo(config: dict):
             if not arquivos:
                 print("⚠ Nenhum vídeo gerado. Pulando.")
                 continue
-            
+
             print("  VIDEO MANAGER: Processando vídeo final...")
             caminho_final = processar_videos(
                 personagem=pid,
@@ -221,15 +232,81 @@ def executar_ciclo(config: dict):
     return resultados
 
 
+# ===========================================================================
+# ANÚNCIOS DE PRODUTOS — novo fluxo
+# ===========================================================================
+
+def executar_anuncios(config: dict):
+    from automation_flow.flows.anuncios.watcher import (
+        coletar_tarefas,
+        monitorar_loop,
+        garantir_estrutura,
+    )
+
+    modelos = config.get("modelos")
+    tipos   = config.get("tipos_filmagem")
+    modo    = config.get("modo", "continuo")
+
+    garantir_estrutura()
+
+    def processar_tarefas(tarefas):
+        linha()
+        print(
+            f"  ANÚNCIOS — {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} — "
+            f"{len(tarefas)} tarefa(s) detectada(s)"
+        )
+        linha()
+        for tarefa in tarefas:
+            print(f"\n  → {tarefa}")
+            print("  [FASE 2] Gemini browser — geração de imagem: em breve.")
+            print("  [FASE 3] Flow/Veo3     — geração de vídeo:   em breve.")
+
+    if modo == "unico":
+        tarefas = coletar_tarefas(
+            modelos_filtro=modelos,
+            tipos_filtro=tipos,
+        )
+        if tarefas:
+            processar_tarefas(tarefas)
+        else:
+            print("  Nenhuma imagem pendente encontrada. Encerrando.")
+    else:
+        monitorar_loop(
+            callback=processar_tarefas,
+            modelos_filtro=modelos,
+            tipos_filtro=tipos,
+            intervalo_segundos=30,
+        )
+
+
+# ===========================================================================
+# ENTRY POINT
+# ===========================================================================
+
 def main():
     linha()
     print("  AUTOMAÇÃO DE VÍDEOS")
     linha()
 
-    # Sincroniza uma vez logo no início também (primeiro ciclo imediato)
+    # Sincroniza uma vez logo no início (primeiro ciclo imediato)
     sincronizar_credenciais_humble()
 
     config = exibir_menu()
+
+    # -------------------------------------------------------------------
+    # NOVO — deriva para anúncios se o menu retornou modo_operacao=anuncios
+    # -------------------------------------------------------------------
+    if config.get("modo_operacao") == "anuncios":
+        print("\nMODO ANÚNCIOS — Sistema iniciado. Ctrl+C para encerrar.")
+        try:
+            executar_anuncios(config)
+        except KeyboardInterrupt:
+            print("\nEncerrado pelo usuário.")
+        return
+
+    # -------------------------------------------------------------------
+    # ORIGINAL — fluxo de conteúdo orgânico (sem alteração)
+    # -------------------------------------------------------------------
     modo = config["modo"]
     ciclo_num = 0
 
@@ -256,6 +333,7 @@ def main():
                 aguardar_proxima_janela()
         except KeyboardInterrupt:
             print(f"\nEncerrado pelo usuário após {ciclo_num} ciclos. Até a próxima!")
+
 
 
 if __name__ == "__main__":

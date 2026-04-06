@@ -14,6 +14,9 @@ from automation_flow.core.clients.humble_client import (
     HumbleFlowError,
     HumbleAccountDisabledError,
 )
+from automation_flow.flows.anuncios.gemini_anuncios_integration import (
+    GeminiAnunciosViaFlow,
+)
 
 HUMBLE_ACCOUNTS = settings.HUMBLE_ACCOUNTS
 
@@ -94,16 +97,20 @@ def _abrir_conta(conta: dict):
     driver = criar_driver_humble()
     fluxo_completo_login_e_preparo(driver, email, senha)
 
+    # Aqui o Flow já está aberto/logado. Se este processo estiver rodando
+    # no modo "Anúncios de produtos", você pode já criar a fachada do Gemini
+    # e pendurar na própria conta:
+    #
+    #   conta["_gemini"] = GeminiAnunciosViaFlow(driver)
+    #
+    # Depois, no fluxo de anúncios, basta usar:
+    #   gemini = conta["_gemini"]
+    #   roteiro = gemini.gerar_roteiro_anuncio(...)
+    #
+    # Por enquanto, só deixamos preparado para não interferir no modo Conteúdo.
+
     _log(f"[CONTA #{idx}] Flow pronto para gerar.")
     return driver
-
-
-def _fechar_driver(driver):
-    if driver:
-        try:
-            driver.quit()
-        except Exception:
-            pass
 
 
 # ============================================================================
