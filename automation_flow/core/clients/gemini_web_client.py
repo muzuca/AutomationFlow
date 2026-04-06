@@ -26,8 +26,6 @@ from selenium.common.exceptions import TimeoutException
 
 GEMINI_APP_URL = "https://gemini.google.com/app"
 
-# Seletor genérico do campo de prompt do Gemini (pode ser ajustado depois
-# que você me mandar um print/HTML da interface).
 _PROMPT_SELECTOR = (
     By.CSS_SELECTOR,
     "div[contenteditable='true'], textarea[aria-label]",
@@ -38,9 +36,27 @@ _RESPONSE_SELECTOR = (
     "model-response, .response-content, message-content",
 )
 
+_ONBOARDING_BUTTON_SELECTORS = [
+    (By.XPATH, "//button[contains(., 'Use Gemini')]"),
+    (By.XPATH, "//button[contains(., 'Usar o Gemini')]"),
+    (By.XPATH, "//button[contains(., 'Continue')]"),
+    (By.XPATH, "//button[contains(., 'Continuar')]"),
+    (By.XPATH, "//button[contains(., 'Next')]"),
+    (By.XPATH, "//button[contains(., 'Próximo')]"),
+]
+
+# botão principal de chat ("Chat with Gemini" ou traduções)
+_CHAT_BUTTON_SELECTORS = [
+    (By.XPATH, "//button[.//span[contains(translate(., 'CHAT WITH GEMINI', 'chat with gemini'), 'chat with gemini')]]"),
+    (By.XPATH, "//button[contains(., 'Chat with Gemini')]"),
+    (By.XPATH, "//button[contains(., 'Conversar com o Gemini')]"),
+    (By.XPATH, "//button[contains(., 'Chat')]"),
+]
+
 
 def _ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
+
 
 
 def _log(msg: str) -> None:
@@ -49,12 +65,6 @@ def _log(msg: str) -> None:
 
 @dataclass
 class GeminiWebClient:
-    """Client simples para operar o Gemini Web usando um WebDriver existente.
-
-    driver   : instância já logada na conta Google (a mesma do Flow)
-    timeout  : tempo máximo de espera
-    """
-
     driver: WebDriver
     timeout: int = 30
 
@@ -63,11 +73,7 @@ class GeminiWebClient:
     # ------------------------------------------------------------------
 
     def abrir(self) -> None:
-        """Abre o Gemini Web em uma nova aba usando o mesmo driver.
-
-        Se já houver uma aba com gemini.google.com aberta, apenas troca o foco
-        para ela.
-        """
+        """Abre o Gemini Web em uma nova aba usando o mesmo driver."""
         _log("[GEMINI] Procurando aba existente do Gemini...")
         for handle in self.driver.window_handles:
             self.driver.switch_to.window(handle)
@@ -77,21 +83,101 @@ class GeminiWebClient:
                 url = ""
             if "gemini.google.com" in url:
                 _log(f"[GEMINI] Aba existente encontrada: {url}")
-                return
-
-        _log(f"[GEMINI] Nenhuma aba do Gemini encontrada. Abrindo nova aba em {GEMINI_APP_URL}...")
-        self.driver.switch_to.new_window("tab")
-        self.driver.get(GEMINI_APP_URL)
+                break
+        else:
+            _log(f"[GEMINI] Nenhuma aba do Gemini encontrada. Abrindo nova aba em {GEMINI_APP_URL}...")
+            self.driver.switch_to.new_window("tab")
+            self.driver.get(GEMINI_APP_URL)
 
         wait = WebDriverWait(self.driver, self.timeout)
+        time.sleep(2)
+
+        self._passar_onboarding(wait)
+        self._clicar_chat_principal(wait)
         self._esperar_prompt(wait)
 
     # ------------------------------------------------------------------
     #  Métodos internos
     # ------------------------------------------------------------------
 
+    def _clicar_elemento_seguro(self, elemento) -> bool:
+        try:
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({block: 'center', inline: 'center'});",
+                elemento,
+            )
+            time.sleep(0.2)
+        except Exception:
+            pass
+
+        try:
+            elemento.click()
+            return True
+        except Exception:
+            try:
+                self.driver.execute_script("arguments[0].click();", elemento)
+                return True
+            except Exception:
+                return False
+
+    def _passar_onboarding(self, wait: WebDriverWait) -> None:
+        """Clica em botões de onboarding como Use Gemini e Continue enquanto aparecerem."""
+        _log("[GEMINI] Verificando telas de onboarding (Use Gemini / Continue / Next)...")
+
+        for _ in range(5):
+            encontrou = False
+
+            for by, selector in _ONBOARDING_BUTTON_SELECTORS:
+                try:
+                    btn = WebDriverWait(self.driver, 3).until(
+                        EC.element_to_be_clickable((by, selector))
+                    )
+                    if btn:
+                        texto = (btn.text or "").strip()
+                        _log(f"[GEMINI] Botão de onboarding encontrado: {texto!r}. Clicando...")
+                        clicou = self._clicar_elemento_seguro(btn)
+                        if clicou:
+                            time.sleep(2)
+                            encontrou = True
+                            break
+                        _log("[GEMINI] ⚠ Falha ao clicar no botão de onboarding.")
+                except TimeoutException:
+                    continue
+                except Exception as e:
+                    _log(f"[GEMINI] ⚠ Erro ao tentar clicar no onboarding: {e}")
+                    continue
+
+            if not encontrou:
+                _log("[GEMINI] Nenhum botão de onboarding visível. Prosseguindo.")
+                return
+
+        _log("[GEMINI] Limite de passos de onboarding atingido. Prosseguindo.")
+
+    def _clicar_chat_principal(self, wait: WebDriverWait) -> None:
+        """Se a tela inicial mostrar 'Chat with Gemini', clica antes de esperar o prompt."""
+        _log("[GEMINI] Verificando se é necessário clicar em 'Chat with Gemini'...")
+        try:
+            for by, selector in _CHAT_BUTTON_SELECTORS:
+                try:
+                    btn = WebDriverWait(self.driver, 3).until(
+                        EC.element_to_be_clickable((by, selector))
+                    )
+                    if btn:
+                        texto = (btn.text or "").strip()
+                        _log(f"[GEMINI] Botão principal de chat encontrado: {texto!r}. Clicando...")
+                        clicou = self._clicar_elemento_seguro(btn)
+                        if clicou:
+                            time.sleep(1.5)
+                            return
+                        _log("[GEMINI] ⚠ Falha ao clicar no botão principal de chat.")
+                except TimeoutException:
+                    continue
+        except Exception as e:
+            _log(f"[GEMINI] ⚠ Erro ao tentar clicar em 'Chat with Gemini': {e}")
+
+        _log("[GEMINI] Nenhum botão explícito de 'Chat with Gemini' detectado, seguindo normalmente.")
+
     def _esperar_prompt(self, wait: WebDriverWait) -> None:
-        """Espera o campo de prompt aparecer (ou falha silenciosamente)."""
         _log("[GEMINI] Aguardando campo de prompt ficar visível...")
         try:
             wait.until(EC.visibility_of_element_located(_PROMPT_SELECTOR))
@@ -100,7 +186,6 @@ class GeminiWebClient:
             _log("[GEMINI] ⚠ Timeout aguardando campo de prompt. Seguindo mesmo assim.")
 
     def _capturar_resposta(self, wait: WebDriverWait) -> str:
-        """Aguarda a resposta do Gemini estabilizar e retorna o texto."""
         _log("[GEMINI] Aguardando início da resposta...")
         try:
             wait.until(EC.presence_of_element_located(_RESPONSE_SELECTOR))
@@ -136,10 +221,6 @@ class GeminiWebClient:
     # ------------------------------------------------------------------
 
     def enviar_prompt(self, texto: str, aguardar_resposta: bool = True) -> str:
-        """Envia um prompt de texto para o Gemini.
-
-        Retorna o texto da resposta (ou string vazia se não conseguir).
-        """
         resumo = (texto[:120] + "...") if len(texto) > 120 else texto
         _log(f"[GEMINI] Preparando envio de prompt ({len(texto)} chars): {resumo!r}")
 
@@ -148,7 +229,7 @@ class GeminiWebClient:
         _log("[GEMINI] Localizando campo de prompt para digitar...")
         campo = wait.until(EC.element_to_be_clickable(_PROMPT_SELECTOR))
         _log("[GEMINI] Campo de prompt clicável. Focando...")
-        campo.click()
+        self._clicar_elemento_seguro(campo)
         time.sleep(0.2)
 
         _log("[GEMINI] Limpando conteúdo anterior (CTRL+A + BACKSPACE)...")
