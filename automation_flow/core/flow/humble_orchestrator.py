@@ -10,10 +10,18 @@ from acesso_humble import sincronizar_credenciais_humble
 from automation_flow.core.clients.humble_client import (
     criar_driver_humble,
     fluxo_completo_login_e_preparo,
+    fluxo_login_simples_sem_preparo,
     gerar_video_humble,
     HumbleFlowError,
     HumbleAccountDisabledError,
+    clicar_novo_projeto,
+    refresh_flow,
+    _wait_visible,
+    abrir_chip_nano,
+    configurar_nano_video_9x16_x1_fast,
 )
+from selenium.webdriver.common.by import By
+
 from automation_flow.flows.anuncios.gemini_anuncios_integration import (
     GeminiAnunciosViaFlow,
 )
@@ -57,13 +65,13 @@ def _recarregar_contas() -> list[dict]:
     try:
         sincronizar_credenciais_humble()
     except Exception as e:
-        _log(f"❌ Erro ao sincronizar credenciais Humble: {e}")
+        _log(f"⌁ Erro ao sincronizar credenciais Humble: {e}")
         return []
 
     try:
         reload(settings)
     except Exception as e:
-        _log(f"❌ Erro ao recarregar módulo de settings: {e}")
+        _log(f"⌁ Erro ao recarregar módulo de settings: {e}")
         return []
 
     novas = settings.HUMBLE_ACCOUNTS or []
@@ -74,6 +82,14 @@ def _recarregar_contas() -> list[dict]:
     _contas_desativadas.clear()
 
     return novas
+
+
+def _fechar_driver(driver):
+    if driver is not None:
+        try:
+            driver.quit()
+        except Exception:
+            pass
 
 
 # ============================================================================
@@ -97,20 +113,66 @@ def _abrir_conta(conta: dict):
     driver = criar_driver_humble()
     fluxo_completo_login_e_preparo(driver, email, senha)
 
-    # Aqui o Flow já está aberto/logado. Se este processo estiver rodando
-    # no modo "Anúncios de produtos", você pode já criar a fachada do Gemini
-    # e pendurar na própria conta:
-    #
-    #   conta["_gemini"] = GeminiAnunciosViaFlow(driver)
-    #
-    # Depois, no fluxo de anúncios, basta usar:
-    #   gemini = conta["_gemini"]
-    #   roteiro = gemini.gerar_roteiro_anuncio(...)
-    #
-    # Por enquanto, só deixamos preparado para não interferir no modo Conteúdo.
-
     _log(f"[CONTA #{idx}] Flow pronto para gerar.")
     return driver
+
+
+def _abrir_conta_para_anuncios(conta: dict):
+    """
+    Abre a conta Humble em login simples, sem entrar em Novo projeto/Nano.
+    Ideal para: Gemini primeiro, preparação do Flow depois.
+    """
+    idx = conta["indice"]
+    email = conta["email"]
+    senha = conta["senha"]
+
+    _log(f"[CONTA #{idx}] Inicializando conta para anúncios: {email}")
+
+    driver = criar_driver_humble()
+    fluxo_login_simples_sem_preparo(driver, email, senha)
+
+    _log(f"[CONTA #{idx}] Login simples concluído. Pronta para Gemini + Flow.")
+    return driver
+
+
+def _preparar_flow_para_video(driver):
+    """
+    Prepara o Flow para geração de vídeo depois que o Gemini já terminou.
+    """
+    _log("[ANUNCIOS] Voltando ao Flow e preparando Novo projeto / Nano...")
+
+    clicar_novo_projeto(driver)
+    refresh_flow(driver, "após Novo projeto")
+    _wait_visible(
+        driver,
+        By.XPATH,
+        "//button[contains(., 'Nano Banana 2') and @aria-haspopup='menu']",
+        timeout=30,
+        descricao="chip Nano Banana 2 após refresh",
+    )
+    abrir_chip_nano(driver)
+    configurar_nano_video_9x16_x1_fast(driver)
+
+    _log("[ANUNCIOS] Flow preparado para geração do vídeo.")
+
+
+def _voltar_para_aba_flow(driver):
+    """
+    Tenta localizar e focar a aba do Flow.
+    """
+    _log("[ANUNCIOS] Procurando aba do Flow para retomar a geração...")
+    for handle in driver.window_handles:
+        driver.switch_to.window(handle)
+        try:
+            url = (driver.current_url or "").lower()
+        except Exception:
+            url = ""
+
+        if "labs.google/fx" in url:
+            _log(f"[ANUNCIOS] Aba do Flow localizada: {url}")
+            return
+
+    raise HumbleFlowError("Não encontrei a aba do Flow para continuar a geração.")
 
 
 # ============================================================================
@@ -154,7 +216,7 @@ def _tentar_gerar_na_mesma_sessao(
 
         except Exception as e:
             _log(
-                f"❌ Conta #{conta['indice']} falhou na cena {idx_prompt} "
+                f"⌁ Conta #{conta['indice']} falhou na cena {idx_prompt} "
                 f"(tentativa {tentativa}/{MAX_TENTATIVAS_MESMO_FLOW}): {e}"
             )
 
@@ -167,11 +229,182 @@ def _tentar_gerar_na_mesma_sessao(
             time.sleep(ESPERA_ENTRE_TENTATIVAS_S)
 
     _log(
-        f"❌ Conta #{conta['indice']} esgotou "
+        f"⌁ Conta #{conta['indice']} esgotou "
         f"{MAX_TENTATIVAS_MESMO_FLOW} tentativas no mesmo Flow "
         f"para a cena {idx_prompt}."
     )
     return None
+
+
+# ============================================================================
+#   ANÚNCIOS
+# ============================================================================
+
+def _beneficios_padrao_por_modelo(tarefa) -> list[str]:
+    slug = tarefa.modelo_slug.lower()
+
+    if slug == "lara_select":
+        return [
+            "100% algodão orgânico, mais conforto",
+            "sem perfume e sem substâncias tóxicas",
+            "proteção segura para o dia a dia",
+        ]
+
+    if slug == "ana_indica":
+        return [
+            "destaque visual do produto",
+            "benefício principal explicado de forma simples",
+            "chamada direta para compra no TikTok Shop",
+        ]
+
+    return [
+        "benefício principal do produto",
+        "diferencial percebido logo no primeiro uso",
+        "chamada clara para compra no TikTok Shop",
+    ]
+
+
+def processar_tarefa_anuncio(tarefa) -> Path:
+    """
+    Processa uma única tarefa de anúncio:
+    - abre conta Humble com login simples;
+    - gera roteiro via Gemini;
+    - volta ao Flow;
+    - prepara Novo projeto/Nano;
+    - gera vídeo e salva em tarefa.dir_concluido.
+    """
+    if not HUMBLE_ACCOUNTS:
+        raise HumbleFlowError(
+            "Nenhuma conta HUMBLE_EMAIL_N / HUMBLE_PASSWORD_N encontrada no .env"
+        )
+
+    total_contas = len(HUMBLE_ACCOUNTS)
+    indice_conta_atual = 0
+    ultimo_erro = None
+    contas_tentadas = 0
+
+    while True:
+        contas_ativas = [c for c in HUMBLE_ACCOUNTS if not _conta_esta_desativada(c)]
+        if not contas_ativas:
+            novas = _recarregar_contas()
+            if not novas:
+                raise HumbleFlowError(
+                    f"Nenhuma conta ativa disponível para processar o anúncio {tarefa.id_anuncio}."
+                )
+            contas_ativas = [c for c in HUMBLE_ACCOUNTS if not _conta_esta_desativada(c)]
+            if not contas_ativas:
+                raise HumbleFlowError(
+                    f"Todas as contas continuam indisponíveis após ressincronizar para o anúncio {tarefa.id_anuncio}."
+                )
+
+        if contas_tentadas >= len(contas_ativas):
+            novas = _recarregar_contas()
+            if not novas:
+                msg = (
+                    f"Não foi possível processar o anúncio {tarefa.id_anuncio} "
+                    f"em nenhuma conta disponível."
+                )
+                if ultimo_erro:
+                    msg += f" Último erro: {ultimo_erro}"
+                raise HumbleFlowError(msg)
+
+            total_contas = len(HUMBLE_ACCOUNTS)
+            indice_conta_atual = 0
+            contas_tentadas = 0
+            continue
+
+        tentativas_rotacao = 0
+        conta = None
+        while tentativas_rotacao < total_contas:
+            candidata = HUMBLE_ACCOUNTS[indice_conta_atual]
+            indice_conta_atual = (indice_conta_atual + 1) % total_contas
+            tentativas_rotacao += 1
+            if not _conta_esta_desativada(candidata):
+                conta = candidata
+                break
+
+        if conta is None:
+            raise HumbleFlowError(
+                f"Todas as contas estão desativadas para o anúncio {tarefa.id_anuncio}."
+            )
+
+        contas_tentadas += 1
+        driver = None
+
+        try:
+            _log(f"[ANUNCIOS] Iniciando tarefa: {tarefa}")
+            driver = _abrir_conta_para_anuncios(conta)
+
+            gemini = GeminiAnunciosViaFlow(driver)
+            beneficios = _beneficios_padrao_por_modelo(tarefa)
+
+            _log(
+                f"[ANUNCIOS] Gerando roteiro no Gemini para produto "
+                f"'{tarefa.nome_produto}'..."
+            )
+            roteiro = gemini.gerar_roteiro_anuncio(
+                nome_produto=tarefa.nome_produto,
+                beneficios=beneficios,
+                tom="feminino, empático e direto",
+                duracao=25,
+            )
+
+            if not roteiro.strip():
+                raise HumbleFlowError(
+                    f"Gemini retornou roteiro vazio para o anúncio {tarefa.id_anuncio}."
+                )
+
+            _log(
+                f"[ANUNCIOS] Roteiro gerado com {len(roteiro)} caracteres para "
+                f"anúncio #{tarefa.id_anuncio}."
+            )
+
+            _voltar_para_aba_flow(driver)
+            _preparar_flow_para_video(driver)
+
+            nome_arquivo = (
+                f"{tarefa.modelo_slug}_{tarefa.tipo_filmagem}_{tarefa.id_anuncio}.mp4"
+            )
+
+            _log(
+                f"[ANUNCIOS] Gerando vídeo no Flow para anúncio #{tarefa.id_anuncio}..."
+            )
+            video = gerar_video_humble(
+                driver=driver,
+                prompt=roteiro,
+                destinodir=tarefa.dir_concluido,
+                nomearquivo=nome_arquivo,
+            )
+
+            _log(
+                f"[ANUNCIOS] Vídeo concluído para anúncio #{tarefa.id_anuncio}: "
+                f"{video}"
+            )
+            return video
+
+        except HumbleAccountDisabledError as e:
+            ultimo_erro = e
+            if conta:
+                _log(
+                    f"🚫 Conta #{conta['indice']} desativada durante anúncio "
+                    f"{tarefa.id_anuncio}: {e}"
+                )
+                _marcar_conta_desativada(conta["email"])
+            if driver is not None:
+                _fechar_driver(driver)
+                driver = None
+            continue
+
+        except Exception as e:
+            ultimo_erro = e
+            _log(
+                f"⌁ Falha ao processar anúncio #{tarefa.id_anuncio} "
+                f"com conta #{conta['indice'] if conta else '?'}: {e}"
+            )
+            if driver is not None:
+                _fechar_driver(driver)
+                driver = None
+            continue
 
 
 # ============================================================================
@@ -221,9 +454,6 @@ def main(prompts: list[str]) -> list[Path]:
         contas_tentadas_nesta_cena = 0
 
         while not gerou:
-            # ------------------------------------------------------------------
-            # 1) Tenta na conta/sessão já aberta
-            # ------------------------------------------------------------------
             if driver_atual is not None and conta_atual is not None:
                 try:
                     arquivo = _tentar_gerar_na_mesma_sessao(
@@ -248,7 +478,6 @@ def main(prompts: list[str]) -> list[Path]:
                     gerou = True
                     break
 
-                # Falhou: fecha SEMPRE antes de rotacionar
                 _log(
                     f"⚠ Conta #{conta_atual['indice'] if conta_atual else '?'} falhou após "
                     f"{MAX_TENTATIVAS_MESMO_FLOW} tentativas no mesmo Flow. "
@@ -258,9 +487,6 @@ def main(prompts: list[str]) -> list[Path]:
                 driver_atual = None
                 conta_atual = None
 
-            # ------------------------------------------------------------------
-            # 2) Verifica se ainda há contas disponíveis para esta cena
-            # ------------------------------------------------------------------
             contas_ativas = [
                 c for c in HUMBLE_ACCOUNTS if not _conta_esta_desativada(c)
             ]
@@ -296,9 +522,6 @@ def main(prompts: list[str]) -> list[Path]:
                         f"pois todas as contas estão desativadas após ressincronizar."
                     )
 
-            # ------------------------------------------------------------------
-            # 3) Abre próxima conta disponível
-            # ------------------------------------------------------------------
             tentativas_rotacao = 0
             conta = None
             while tentativas_rotacao < total_contas:
@@ -328,15 +551,12 @@ def main(prompts: list[str]) -> list[Path]:
                 continue
             except Exception as e:
                 ultimo_erro = e
-                _log(f"❌ Conta #{conta['indice']} não conseguiu preparar o Flow: {e}")
+                _log(f"⌁ Conta #{conta['indice']} não conseguiu preparar o Flow: {e}")
                 _fechar_driver(driver_atual)
                 driver_atual = None
                 conta_atual = None
                 continue
 
-            # ------------------------------------------------------------------
-            # 4) Tenta gerar na conta recém-aberta
-            # ------------------------------------------------------------------
             try:
                 arquivo = _tentar_gerar_na_mesma_sessao(
                     driver=driver_atual,
@@ -360,7 +580,6 @@ def main(prompts: list[str]) -> list[Path]:
                 gerou = True
                 break
 
-            # Falhou nessa conta também: fecha e tenta a próxima
             _log(
                 f"⚠ Conta #{conta_atual['indice'] if conta_atual else '?'} não conseguiu "
                 f"gerar a cena {idx_prompt} mesmo após {MAX_TENTATIVAS_MESMO_FLOW} tentativas. "
@@ -372,11 +591,10 @@ def main(prompts: list[str]) -> list[Path]:
 
         _log(f"✔ Vídeo {idx_prompt}/{len(prompts)} gerado com sucesso.")
 
-    # Fecha a última sessão aberta ao terminar o lote
     _fechar_driver(driver_atual)
 
     if not arquivos_baixados and ultimo_erro:
-        _log(f"❌ Nenhum vídeo gerado. Último erro: {ultimo_erro}")
+        _log(f"⌁ Nenhum vídeo gerado. Último erro: {ultimo_erro}")
 
     _log(f"✔ {len(arquivos_baixados)}/{len(prompts)} cenas geradas com sucesso.")
     return arquivos_baixados
