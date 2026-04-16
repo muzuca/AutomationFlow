@@ -1,17 +1,12 @@
 """
-Persona: Geraldo Executivo
-Arquivo único com tudo que define o Geraldo: identidade, visual Veo3, temas e gerador.
-Roteiros focados em amor, galanteio de mulheres e viagens românticas de luxo.
-
-Regras extras:
-- Cada diálogo de cena (áudio) DEVE ter entre 20 e 22 palavras.
-- Evitar repetição de temas aleatórios recentes (quando houver histórico).
-- Evitar repetição de falas/contexts muito parecidos com os últimos roteiros (via regras no prompt).
+arquivo: personas/geraldo_executivo.py
+descrição: Arquivo de identidade do Geraldo Executivo. Define visual Veo3 de luxo, temas românticos e sedutores, e lógica de geração de convites exclusivos em cenários europeus e tropicais.
 """
 
 import random
 
-from automation_flow.flows.content.roteiro_core import (
+# Import atualizado para a nova estrutura unificada do core
+from conteudo.core import (
     gerar_roteiro_generico,
     contar_palavras,
 )
@@ -212,15 +207,6 @@ def _montar_prompt(cena: dict, dialogo: str, tema: str) -> str:
         f"{TECH_BLOCK}"
     )
 
-# ── Ajuste automático de diálogo (desativado) ────────────────────────────────
-def _ajustar_dialogo(dialogo: str) -> str:
-    """
-    Stub mantido apenas por compatibilidade.
-    NÃO deve cortar ou alterar o diálogo.
-    O ajuste agora é responsabilidade do core via tentativas extras.
-    """
-    return dialogo
-
 # ── Validação de diálogos ─────────────────────────────────────────────────────
 def _validar_dialogos(
     cenas_json: list,
@@ -255,16 +241,11 @@ def _validar_dialogos(
 
 # ── Utilitários de histórico / não repetição ─────────────────────────────────
 def _escolher_tema(tema: str, historico: list[dict]) -> str:
-    """
-    - Se tema != 'aleatorio', retorna o próprio tema.
-    - Se tema == 'aleatorio', escolhe um tema que NÃO esteja entre os mais recentes do histórico,
-      se possível.
-    """
     if tema != "aleatorio":
         return tema
 
     temas_fixos = [t for t in TEMAS.keys() if t != "aleatorio"]
-    usados_recentemente = {item.get("tema") for item in historico[-HISTORICO_MAX:]}
+    usados_recentemente = {item.get("tema") for item in (historico or [])[-HISTORICO_MAX:]}
     candidatos = [t for t in temas_fixos if t not in usados_recentemente]
 
     if candidatos:
@@ -274,9 +255,6 @@ def _escolher_tema(tema: str, historico: list[dict]) -> str:
 
 
 def _montar_regras_nao_repeticao(historico: list[dict]) -> str:
-    """
-    Gera instruções para o modelo evitando repetição de falas/temas recentes.
-    """
     if not historico:
         return ""
 
@@ -316,29 +294,6 @@ def _montar_regras_nao_repeticao(historico: list[dict]) -> str:
 
     return regras
 
-# ── Helper para atualizar histórico (usado fora) ─────────────────────────────
-def atualizar_historico_geraldo(
-    historico: list[dict],
-    novo_roteiro: dict,
-    tema: str,
-    mensagem_central: str,
-) -> list[dict]:
-    """
-    Recebe o histórico anterior + o dict retornado por gerar_roteiro
-    e devolve um novo histórico já truncado nos últimos HISTORICO_MAX.
-    """
-    cenas = novo_roteiro.get("cenas", [])
-    falas = [c.get("dialogo", "") for c in cenas if c.get("dialogo")]
-
-    item = {
-        "tema": tema,
-        "mensagem_central": mensagem_central,
-        "falas": falas,
-    }
-
-    historico_novo = (historico or []) + [item]
-    return historico_novo[-HISTORICO_MAX:]
-
 # ── Gerador principal ─────────────────────────────────────────────────────────
 def gerar_roteiro(
     tema: str,
@@ -347,16 +302,6 @@ def gerar_roteiro(
     n_cenas: int = CENAS_PADRAO,
     historico: list[dict] | None = None,
 ) -> dict:
-    """
-    historico: lista com os últimos roteiros dessa persona.
-      Cada item sugerido:
-      {
-        "tema": "roma",
-        "mensagem_central": "...",
-        "falas": ["fala cena1", "fala cena2", ...],
-        "hash_contexto": "string-opcional"
-      }
-    """
     historico = historico or []
     n_cenas = max(2, int(n_cenas))
     tema_escolhido = _escolher_tema(tema, historico)

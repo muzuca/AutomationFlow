@@ -1,4 +1,9 @@
-# gemini_client.py
+"""
+arquivo: integrations/gemini.py
+descrição: Gerencia a integração com a API do Google Gemini, incluindo a configuração do modelo, 
+           tratamento de segurança, detecção de erros de quota e rotação automática de chaves.
+"""
+
 import os
 import re
 import time
@@ -8,6 +13,7 @@ from typing import List, Optional
 from google import genai
 from google.genai import types
 
+# --- CONFIGURAÇÕES DE API ---
 _GEMINI_API_KEYS_RAW = os.getenv("GEMINI_API_KEYS", "")
 _GEMINI_API_KEYS: List[str] = [k.strip() for k in _GEMINI_API_KEYS_RAW.split(",") if k.strip()]
 
@@ -16,7 +22,8 @@ if not _GEMINI_API_KEYS:
     if unica:
         _GEMINI_API_KEYS = [unica]
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# Modelo conforme seu arquivo original
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
 
 class GeminiKeyRotator:
@@ -158,12 +165,15 @@ def _gerar_texto_com_rotacao(
                 cooldown = retry_delay if retry_delay is not None else 3600
 
                 print(
-                    f"  ⚠ Quota/429 detectado. "
-                    f"Cooldown desta chave por {cooldown}s e rotação para a próxima."
+                    f"  ⚠ Quota/503 detectado. "
+                    f"Aguardando 2s e rotacionando para a próxima chave..."
                 )
+                
+                # ADICIONE A LINHA ABAIXO:
+                time.sleep(2) 
+                
                 _rotator.mark_rate_limited(api_key, cooldown=cooldown)
                 _rotator.rotate_and_get()
-                time.sleep(1)
                 continue
 
             raise
@@ -180,6 +190,7 @@ def gerar_com_rotacao_json(
     max_output_tokens: int = 4096,
     temperature: float = 0.9,
 ) -> str:
+    """Função chamada pelo core.py"""
     return _gerar_texto_com_rotacao(
         mensagem_usuario=mensagem_usuario,
         instrucao_sistema=instrucao_sistema,

@@ -1,8 +1,6 @@
 """
-Gerenciador de vídeos pós-geração:
-  1. Concatena os arquivos .mp4 gerados em um único vídeo final
-  2. Remove os arquivos individuais
-  3. Move o vídeo final para a pasta do Google Drive do personagem
+arquivo: conteudo/video_manager.py
+descrição: Gerenciador de vídeos pós-geração: concatena arquivos .mp4, remove temporários e organiza o vídeo final no Google Drive do personagem.
 """
 
 import os
@@ -13,11 +11,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from automation_flow.core.config.settings import (
-    PROJECT_ROOT,
-    FFMPEG_PATH as SETTINGS_FFMPEG_PATH,
-    get_personagem_output_dir,
-)
+# Imports ajustados para o config.py na raiz e nova estrutura
+import config
+from config import PROJECT_ROOT, get_personagem_output_dir
 
 # .env da raiz do projeto
 ENV_PATH = PROJECT_ROOT / ".env"
@@ -25,8 +21,8 @@ load_dotenv(ENV_PATH, override=True)
 
 # FFMPEG ----------------------------------------------------------------------
 
-# Permite override via .env, mas centralizado no settings.py
-_ffmpeg_env = os.getenv("FFMPEG_PATH", SETTINGS_FFMPEG_PATH)
+# Mantendo a lógica de override via .env ou fallback para o settings (config.py)
+_ffmpeg_env = os.getenv("FFMPEG_PATH", config.FFMPEG_PATH)
 FFMPEG_PATH = Path(_ffmpeg_env)
 
 DOWNLOADS_DIR = Path(os.getenv("DOWNLOADS_DIR", str(Path.home() / "Downloads")))

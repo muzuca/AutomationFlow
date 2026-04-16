@@ -1,5 +1,9 @@
-# conteudo/menu.py
-from automation_flow.flows.content import personas
+"""
+arquivo: conteudo/menu.py
+descrição: Interface de linha de comando para configuração da sessão de geração de vídeos (seleção de personagens, temas, signos e quantidade).
+"""
+
+from conteudo import personas
 
 SIGNOS_LISTA = [
     "Áries", "Touro", "Gêmeos", "Câncer", "Leão", "Virgem",
@@ -134,25 +138,8 @@ def selecionar_signo(pid: str) -> str | None:
             print("  Entrada inválida.")
 
 
-def selecionar_motor() -> str:
-    cabecalho("MOTOR DE GERAÇÃO")
-    print("  1. Humble (Flow Web direto via Selenium — padrão)")
-    print("  2. Guru   (Ferramentas Guru + OCR)")
-    while True:
-        entrada = input("  Motor [1/2] [1]: ").strip()
-        if not entrada or entrada == "1":
-            print("  Motor selecionado: Humble")
-            return "humble"
-        if entrada == "2":
-            print("  Motor selecionado: Guru")
-            return "guru"
-        print("  Digite 1 ou 2.")
-
-
 def exibir_menu() -> dict:
     cabecalho("AUTOMAÇÃO DE VÍDEOS — CONFIGURAÇÃO DA SESSÃO")
-    linha("-", 52)
-    motor = selecionar_motor()
 
     linha("-", 52)
     print("  MODO DE EXECUÇÃO")
@@ -200,7 +187,6 @@ def exibir_menu() -> dict:
         })
 
     cabecalho("RESUMO DA SESSÃO")
-    print(f"  Motor:        {'Guru' if motor == 'guru' else 'Humble'}")
     print(f"  Modo:         {modo.capitalize()}")
     print(f"  Vídeos/ciclo: {videos_por_personagem} por personagem")
     print(f"  Personagens:  {len(personagens_config)}")
@@ -215,7 +201,6 @@ def exibir_menu() -> dict:
 
     return {
         "modo": modo,
-        "motor": motor,
         "videos_por_personagem": videos_por_personagem,
         "personagens": personagens_config,
     }

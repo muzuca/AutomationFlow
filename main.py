@@ -1,23 +1,35 @@
-# main.py
+"""
+arquivo: main.py
+descrição: Ponto de entrada da automação. Orquestra o ciclo de vida da geração de conteúdo,
+           desde a seleção no menu até a automação de vídeo e processamento final.
+"""
+
 import sys
 import time
 import random
 from pathlib import Path
 from datetime import datetime
-
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+# Garante que o .env é lido antes de qualquer importação de IA
 load_dotenv(PROJECT_ROOT / ".env", override=True)
 
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from automation_flow.flows.content import personas
-from automation_flow.flows.content.menu import exibir_menu
-from automation_flow.flows.content.historico import registrar_roteiro, roteiro_e_repetido
-from automation_flow.flows.content.scheduler import aguardar_proxima_janela
-from automation_flow.flows.content.video_manager import processar_videos
+# Novos imports curtos usando a nova arquitetura de pastas unificada
+from conteudo import personas
+from conteudo.menu import exibir_menu
+from conteudo.video_manager import processar_videos
+
+# Import unificado do core (Historico + Roteiro + Scheduler)
+from conteudo.core import registrar_roteiro, roteiro_e_repetido, aguardar_proxima_janela
+
+# Integração unificada do Selenium (Humble)
+from integrations.humble import rodar_automacao
+
 from acesso_humble import sincronizar_credenciais_humble
+
 
 MAX_RETRIES_ROTEIRO = 3
 VARIACOES_MENSAGEM = [
@@ -31,14 +43,6 @@ VARIACOES_MENSAGEM = [
 
 def linha(char: str = "=", largura: int = 55) -> None:
     print(char * largura)
-
-
-def _resolver_motor(motor: str):
-    if motor == "humble":
-        from automation_flow.core.flow.humble_orchestrator import main as fn
-        return fn, "Humble"
-    from automation_flow.core.flow.guru_orchestrator import main as fn
-    return fn, "Guru"
 
 
 def _resolver_signo(persona, signo_config: str | None, tema_final: str) -> str | None:
@@ -120,14 +124,14 @@ def executar_ciclo(config: dict):
 
     sincronizar_credenciais_humble()
 
-    motor = config.get("motor", "guru")
-    rodar_automacao, label_motor = _resolver_motor(motor)
     resultados: list[dict] = []
     qtd = config["videos_por_personagem"]
 
+    # LAÇO PRINCIPAL: RODADAS (Round-Robin)
     for rodada in range(1, qtd + 1):
         print(f"\n========== RODADA {rodada}/{qtd} ==========")
 
+        # LAÇO SECUNDÁRIO: PERSONAGENS
         for pcfg in config["personagens"]:
             pid = pcfg["id"]
             nome = pcfg["nome"]
@@ -139,7 +143,7 @@ def executar_ciclo(config: dict):
             print(f"  PERSONAGEM: {nome}")
             print(f"  Signo config: {signo or '—'} | Tema: {tema.capitalize()}")
             print(
-                f"  Motor: {label_motor} | Vídeo desta rodada: "
+                f"  Motor: Humble | Vídeo desta rodada: "
                 f"{rodada}/{qtd} | Cenas/vídeo: {cenas}"
             )
             linha("-", 55)
@@ -160,13 +164,13 @@ def executar_ciclo(config: dict):
                 f"✔ Roteiro gerado — tema: {tema_final} | "
                 f"signo: {signo_final or '—'}"
             )
-            print(f"  [{label_motor}] Gerando {len(roteiro['prompts'])} cenas...")
+            print(f"  [Humble] Gerando {len(roteiro['prompts'])} cenas...")
 
             arquivos = None
             try:
                 arquivos = rodar_automacao(prompts=roteiro["prompts"])
             except Exception as e:
-                print(f"⚠ Erro ao gerar vídeo com motor {label_motor}: {e}")
+                print(f"⚠ Erro ao gerar vídeo com motor Humble: {e}")
                 print("⚠ Pulando este vídeo e seguindo para o próximo personagem.")
                 continue
 
@@ -220,87 +224,17 @@ def executar_ciclo(config: dict):
 
 
 # ===========================================================================
-# ANÚNCIOS DE PRODUTOS — fluxo real
-# ===========================================================================
-
-def executar_anuncios(config: dict):
-    from automation_flow.flows.anuncios.watcher import (
-        coletar_tarefas,
-        monitorar_loop,
-        garantir_estrutura,
-        marcar_concluido,
-        devolver_para_pendente,
-    )
-    from automation_flow.core.flow.humble_orchestrator import processar_tarefa_anuncio
-
-    modelos = config.get("modelos")
-    tipos = config.get("tipos_filmagem")
-    modo = config.get("modo", "continuo")
-
-    garantir_estrutura()
-
-    def processar_tarefas(tarefas):
-        linha()
-        print(
-            f"  ANÚNCIOS — {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} — "
-            f"{len(tarefas)} tarefa(s) detectada(s)"
-        )
-        linha()
-
-        for tarefa in tarefas:
-            print(f"\n  → {tarefa}")
-            try:
-                video_gerado = processar_tarefa_anuncio(tarefa)
-                marcar_concluido(tarefa, video_gerado)
-                print(f"  ✔ Anúncio concluído: {video_gerado.name}")
-            except Exception as e:
-                print(f"  ⚠ Erro ao processar anúncio #{tarefa.id_anuncio}: {e}")
-                try:
-                    devolver_para_pendente(tarefa)
-                except Exception as e2:
-                    print(
-                        f"  ⚠ Falha ao devolver anúncio #{tarefa.id_anuncio} "
-                        f"para pendente: {e2}"
-                    )
-
-    if modo == "unico":
-        tarefas = coletar_tarefas(
-            modelos_filtro=modelos,
-            tipos_filtro=tipos,
-        )
-        if tarefas:
-            processar_tarefas(tarefas)
-        else:
-            print("  Nenhuma imagem pendente encontrada. Encerrando.")
-    else:
-        monitorar_loop(
-            callback=processar_tarefas,
-            modelos_filtro=modelos,
-            tipos_filtro=tipos,
-            intervalo_segundos=30,
-        )
-
-
-# ===========================================================================
 # ENTRY POINT
 # ===========================================================================
 
 def main():
     linha()
-    print("  AUTOMAÇÃO DE VÍDEOS")
+    print("  AUTOMAÇÃO DE VÍDEOS (CONTEÚDO)")
     linha()
 
     sincronizar_credenciais_humble()
 
     config = exibir_menu()
-
-    if config.get("modo_operacao") == "anuncios":
-        print("\nMODO ANÚNCIOS — Sistema iniciado. Ctrl+C para encerrar.")
-        try:
-            executar_anuncios(config)
-        except KeyboardInterrupt:
-            print("\nEncerrado pelo usuário.")
-        return
 
     modo = config["modo"]
     ciclo_num = 0
