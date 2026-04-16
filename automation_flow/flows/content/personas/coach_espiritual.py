@@ -386,7 +386,7 @@ def gerar_roteiro(
         f"- Tema geral: {tema_escolhido}\n"
         f"- Mensagem central: {mensagem_central}\n\n"
         "REGRAS OBRIGATÓRIAS GERAIS:\n"
-        "1. Gere EXATAMENTE {n_cenas} cenas\n"
+        f"1. Gere EXATAMENTE {n_cenas} cenas\n"
         "2. A cena 1 DEVE ser um gancho forte, emocional e imediato\n"
         f"3. A cena {n_cenas} DEVE ser um CTA claro pedindo comentário, 'Amém', concordância ou interação\n"
         "4. As cenas do meio devem aprofundar a mensagem com progressão emocional e espiritual\n"

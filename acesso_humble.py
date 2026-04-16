@@ -5,7 +5,7 @@ from pathlib import Path
 import requests
 
 
-DOC_ID = "1kQPzcMvN6DAUJdIXQm6u2hydExyBJn2xBSHuPiht8gg"
+DOC_ID = "1CxZmaI1Cxrgg3iyDkLxW68bA0jV63CNNrabNk4yNBLg"
 EXPORT_URL = f"https://docs.google.com/document/d/{DOC_ID}/export?format=txt"
 ENV_PATH = Path(".env")
 
