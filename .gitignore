@@ -50,6 +50,8 @@ historico/
 output/
 temp/
 ocr_debug/
+logs/
+chrome_profiles/
 
 # =============================================================================
 # Artefatos locais / binários

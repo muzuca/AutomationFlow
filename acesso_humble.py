@@ -1,12 +1,25 @@
 # acesso_humble.py
+import os
 import re
 from pathlib import Path
 
 import requests
 
 
-DOC_ID = "1kQPzcMvN6DAUJdIXQm6u2hydExyBJn2xBSHuPiht8gg"
-EXPORT_URL = f"https://docs.google.com/document/d/{DOC_ID}/export?format=txt"
+# Suporta múltiplos doc IDs via .env (separados por vírgula)
+# Exemplo: HUMBLE_DOC_IDS=id1,id2,id3
+# Se não definido, usa o ID padrão abaixo
+_DOC_ID_PADRAO = "1kQPzcMvN6DAUJdIXQm6u2hydExyBJn2xBSHuPiht8gg"
+
+def _obter_doc_ids() -> list[str]:
+    """Retorna lista de Google Doc IDs para buscar credenciais."""
+    raw = os.getenv("HUMBLE_DOC_IDS", "").strip()
+    if raw:
+        ids = [d.strip() for d in raw.split(",") if d.strip()]
+        if ids:
+            return ids
+    return [_DOC_ID_PADRAO]
+
 ENV_PATH = Path(".env")
 
 
@@ -93,18 +106,38 @@ def _remover_bloco_humble_env(conteudo: str) -> str:
 
 def sincronizar_credenciais_humble():
     try:
-        print("Lendo dados do Google Doc...")
-        response = requests.get(EXPORT_URL, timeout=30)
-        response.raise_for_status()
-
-        texto_doc = response.text
-        credenciais = _extrair_credenciais_do_documento(texto_doc)
+        doc_ids = _obter_doc_ids()
+        print(f"📄 Lendo credenciais de {len(doc_ids)} documento(s)...")
+        
+        todas_credenciais: list[tuple[str, str]] = []
+        
+        for idx, doc_id in enumerate(doc_ids, 1):
+            url = f"https://docs.google.com/document/d/{doc_id}/export?format=txt"
+            try:
+                print(f"  [{idx}/{len(doc_ids)}] Doc: {doc_id[:20]}...")
+                response = requests.get(url, timeout=30)
+                response.raise_for_status()
+                
+                credenciais_doc = _extrair_credenciais_do_documento(response.text)
+                print(f"    ✅ {len(credenciais_doc)} par(es) encontrados")
+                todas_credenciais.extend(credenciais_doc)
+            except Exception as e:
+                print(f"    ⚠️ Falha ao ler doc {doc_id[:20]}: {e}")
+        
+        # Remove duplicados preservando ordem
+        vistos = set()
+        credenciais = []
+        for email, senha in todas_credenciais:
+            chave = (email, senha)
+            if chave not in vistos:
+                vistos.add(chave)
+                credenciais.append((email, senha))
 
         if not credenciais:
-            print("❌ Nenhum dado encontrado no formato LOGIN: / SENHA: no documento inteiro.")
+            print("❌ Nenhum dado encontrado no formato LOGIN: / SENHA: nos documentos.")
             return
 
-        print(f"ℹ {len(credenciais)} par(es) LOGIN/SENHA encontrados no documento.")
+        print(f"ℹ {len(credenciais)} par(es) LOGIN/SENHA únicos no total.")
 
         conteudo_atual = ""
         if ENV_PATH.exists():
@@ -126,7 +159,7 @@ def sincronizar_credenciais_humble():
         conteudo_final = "\n\n".join(partes_finais).strip() + "\n"
         ENV_PATH.write_text(conteudo_final, encoding="utf-8")
 
-        print(f"\n✅ Concluído! .env sincronizado com o Google Doc.")
+        print(f"\n✅ Concluído! .env sincronizado com {len(doc_ids)} documento(s).")
         print(f"✅ {len(credenciais)} par(es) de credenciais Humble gravados no arquivo.")
 
     except Exception as e:
