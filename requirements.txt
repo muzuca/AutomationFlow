@@ -1,0 +1,20 @@
+# AutomationFlow — dependências
+# Instalar com: pip install -r requirements.txt
+
+# Core
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+# Google Gemini API (geração de roteiros)
+google-genai>=1.0.0
+
+# Browser Automation
+selenium>=4.20.0
+webdriver-manager>=4.0.0
+undetected-chromedriver>=3.5.0
+
+# Clipboard (para input de prompts no Flow)
+pyperclip>=1.8.0
+
+# Video processing
+# ffmpeg — binário externo (ffmpeg.exe na raiz do projeto)
