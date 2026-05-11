@@ -4,6 +4,7 @@
 # Core
 python-dotenv>=1.0.0
 requests>=2.31.0
+setuptools>=69.0.0
 
 # Google Gemini API (geração de roteiros)
 google-genai>=1.0.0
