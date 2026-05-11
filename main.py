@@ -883,7 +883,10 @@ def main():
         try:
             from acesso_humble import sincronizar_credenciais_humble
             sincronizar_credenciais_humble()
-            settings = get_settings()  # Recarrega com as contas sincronizadas
+            # Recarrega .env no os.environ (as novas HUMBLE_EMAIL_* foram gravadas em disco)
+            from dotenv import load_dotenv
+            load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
+            settings = get_settings()  # Agora lê as contas novas
             _log(f"Contas apos sync: {len(settings.accounts)}")
         except Exception as e:
             _log(f"Sincronizacao de credenciais falhou: {e}")
