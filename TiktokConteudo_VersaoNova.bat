@@ -3,21 +3,26 @@ echo Iniciando Automacao Flow - Gerador de Conteudo...
 echo.
 
 :: 1. Entre na pasta raiz do seu projeto
-cd /d "C:\Users\vinic\Desktop\Projetos\AutomationFlow"
+cd /d "%~dp0"
 
 :: 2. Pega a ultima versao do repositorio
 git pull
 
-:: 3. Ative o ambiente virtual (supondo que o nome da pasta do seu venv seja 'venv')
-:: Se o nome for diferente, troque 'venv' pelo nome correto (ex: 'ambiente_instancia_1')
+:: 3. Cria o venv se nao existir
+if not exist "venv\Scripts\activate.bat" (
+    echo Criando ambiente virtual...
+    python -m venv venv
+)
+
+:: 4. Ativa o ambiente virtual
 call venv\Scripts\activate
 
-:: 4. Instala os ultimos pacotes necessarios
+:: 5. Instala/atualiza dependencias
 pip install --upgrade pip
-pip install -r .\requirements.txt
+pip install -r requirements.txt
 
-:: 3. Execute o script principal
+:: 6. Executa o script principal
 python main.py
 
-:: 4. Mantém a janela aberta caso dê algum erro (opcional, mas recomendado)
+:: 7. Mantem a janela aberta caso de algum erro
 pause
