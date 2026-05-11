@@ -878,20 +878,21 @@ def main():
     _log(f"Configuracoes carregadas | headless={settings.chrome_headless} | "
          f"engine={settings.browser_engine} | contas={len(settings.accounts)}")
     
+    # 2. Sincronizar credenciais (se habilitado) — ANTES do guard de contas
+    if settings.sync_humble:
+        try:
+            from acesso_humble import sincronizar_credenciais_humble
+            sincronizar_credenciais_humble()
+            settings = get_settings()  # Recarrega com as contas sincronizadas
+            _log(f"Contas apos sync: {len(settings.accounts)}")
+        except Exception as e:
+            _log(f"Sincronizacao de credenciais falhou: {e}")
+    
     # Guard: precisa de contas
     if not settings.accounts:
         _log("FATAL: Nenhuma conta encontrada no .env!")
         _log("   Configure HUMBLE_EMAIL_1 / HUMBLE_PASSWORD_1 no arquivo .env")
         sys.exit(1)
-    
-    # 2. Sincronizar credenciais (se habilitado)
-    if settings.sync_humble:
-        try:
-            from acesso_humble import sincronizar_credenciais_humble
-            sincronizar_credenciais_humble()
-            settings = get_settings()
-        except Exception as e:
-            _log(f"Sincronizacao de credenciais falhou: {e}")
     
     # 3. Limpar processos Chrome/ChromeDriver da execução anterior
     pid_manager.limpar_execucao_anterior()
