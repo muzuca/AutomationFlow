@@ -16,5 +16,8 @@ undetected-chromedriver>=3.5.0
 # Clipboard (para input de prompts no Flow)
 pyperclip>=1.8.0
 
+# Proxy SOCKS5 (bridge local para o Chrome)
+pproxy>=2.7.0
+
 # Video processing
 # ffmpeg — binário externo (ffmpeg.exe na raiz do projeto)
